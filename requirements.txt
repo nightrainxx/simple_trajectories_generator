@@ -1,0 +1,9 @@
+# 基础数据处理和科学计算
+numpy>=1.21.0
+rasterio>=1.2.0
+scikit-image>=0.18.0
+matplotlib>=3.4.0
+networkx>=2.6.0
+
+# 工具包
+tqdm>=4.62.0  # 进度条 
