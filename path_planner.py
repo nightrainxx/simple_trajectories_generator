@@ -8,147 +8,20 @@
 """
 
 import numpy as np
-import heapq
-from typing import List, Tuple, Dict, Set, Optional
-import rasterio
-from utils import get_neighbors, calculate_distance
-from map_generator import MapGenerator
-from config import MAX_CROSS_SLOPE_DEGREES
-from point_selector import PointSelector
+from typing import List, Tuple, Optional
+from pathfinding.core.grid import Grid
+from pathfinding.finder.a_star import AStarFinder
+from pathfinding.core.diagonal_movement import DiagonalMovement
 
-class Node:
-    """路径节点类"""
-    def __init__(
-        self,
-        row: int,
-        col: int,
-        g_cost: float = 0,
-        h_cost: float = 0,
-        parent: Optional['Node'] = None
-    ):
-        self.row = row
-        self.col = col
-        self.g_cost = g_cost  # 从起点到当前点的实际成本
-        self.h_cost = h_cost  # 从当前点到终点的估计成本
-        self.f_cost = g_cost + h_cost  # 总成本
-        self.parent = parent
-        
-    def __lt__(self, other: 'Node') -> bool:
-        """优先队列比较函数"""
-        return self.f_cost < other.f_cost
-        
-    def __eq__(self, other: object) -> bool:
-        """相等性比较"""
-        if not isinstance(other, Node):
-            return NotImplemented
-        return self.row == other.row and self.col == other.col
-        
-    def __hash__(self) -> int:
-        """哈希函数，用于集合操作"""
-        return hash((self.row, self.col))
-        
 class PathPlanner:
-    """路径规划器类: 实现A*算法"""
-    
-    def __init__(
-        self,
-        env: MapGenerator
-    ):
-        """
-        初始化路径规划器
-
-        参数:
-            env: MapGenerator对象，包含地形、速度和成本数据
-        """
+    def __init__(self, env):
         self.env = env
-        if self.env.cost_map is None:
-            raise ValueError("请先生成成本图")
         
-        # 预计算地图尺寸
-        self.height, self.width = self.env.cost_map.shape
-        
-        # 设置搜索限制
-        self.max_iterations = 100000  # 最大迭代次数
-        
-        # 预计算8个方向的偏移量和成本
-        self.directions = [
-            (-1, 0),   # 上
-            (1, 0),    # 下
-            (0, -1),   # 左
-            (0, 1),    # 右
-            (-1, -1),  # 左上
-            (-1, 1),   # 右上
-            (1, -1),   # 左下
-            (1, 1)     # 右下
-        ]
-        self.direction_costs = [1.0, 1.0, 1.0, 1.0, 1.414, 1.414, 1.414, 1.414]
-        
-        # 预计算成本阈值（用于剪枝）
-        valid_costs = self.env.cost_map[self.env.cost_map < float('inf')]
-        self.cost_threshold = np.percentile(valid_costs, 99)  # 使用99百分位数
-        self.max_cost = self.cost_threshold * 2  # 设置最大成本为阈值的2倍
-    
-    def is_valid_point(self, row: int, col: int) -> bool:
-        """检查点是否有效且成本合理"""
-        if not (0 <= row < self.height and 0 <= col < self.width):
+    def is_valid_point(self, x: int, y: int) -> bool:
+        """检查点是否有效"""
+        if not (0 <= x < self.env.width and 0 <= y < self.env.height):
             return False
-            
-        cost = self.env.cost_map[row, col]
-        return cost < self.max_cost
-    
-    def get_neighbors(self, node: Node) -> List[Tuple[int, int, float]]:
-        """获取邻居节点（使用向量化操作）"""
-        # 计算所有可能的邻居位置
-        new_rows = node.row + np.array([d[0] for d in self.directions])
-        new_cols = node.col + np.array([d[1] for d in self.directions])
-        
-        # 创建掩码
-        valid_mask = (
-            (new_rows >= 0) & (new_rows < self.height) &
-            (new_cols >= 0) & (new_cols < self.width)
-        )
-        
-        neighbors = []
-        for i, (valid, dr, dc, base_cost) in enumerate(zip(
-            valid_mask,
-            new_rows,
-            new_cols,
-            self.direction_costs
-        )):
-            if valid and self.is_valid_point(dr, dc):
-                cost = base_cost * self.env.cost_map[dr, dc]
-                if cost < self.max_cost:  # 添加成本检查
-                    neighbors.append((dr, dc, cost))
-        
-        return neighbors
-    
-    def heuristic(self, start: Tuple[int, int], goal: Tuple[int, int]) -> float:
-        """计算启发式成本（切比雪夫距离）"""
-        dr = abs(start[0] - goal[0])
-        dc = abs(start[1] - goal[1])
-        return max(dr, dc)  # 使用切比雪夫距离
-    
-    def get_path_from_node(
-        self,
-        node: Node
-    ) -> List[Tuple[int, int]]:
-        """
-        从终点节点回溯得到完整路径
-
-        参数:
-            node: 终点节点
-
-        返回:
-            路径点列表
-        """
-        path = []
-        current = node
-        
-        while current is not None:
-            path.append((current.row, current.col))
-            current = current.parent
-            
-        return path[::-1]  # 反转列表,使其从起点开始
+        return self.env.cost_map[x, y] < float('inf')
         
     def find_path(
         self,
@@ -161,101 +34,56 @@ class PathPlanner:
             raise ValueError("起点不可达")
         if not self.is_valid_point(goal[0], goal[1]):
             raise ValueError("终点不可达")
+            
+        # 处理成本图，将其转换为整数权重矩阵
+        cost_map = self.env.cost_map.copy()
         
-        # 计算直线距离作为参考
-        direct_distance = np.sqrt(
-            (goal[0] - start[0])**2 + 
-            (goal[1] - start[1])**2
+        # 将无穷大值替换为一个较大的有限值
+        max_finite_cost = np.max(cost_map[np.isfinite(cost_map)])
+        cost_map[np.isinf(cost_map)] = max_finite_cost * 10
+        
+        # 确保所有值都是有限的正数
+        cost_map = np.clip(cost_map, 0, max_finite_cost * 10)
+        
+        # 将成本图缩放到合适的整数范围（1-1000）
+        scale_factor = 1000.0 / max_finite_cost
+        weights_matrix = np.round(cost_map * scale_factor).astype(np.int32)
+        
+        # 确保没有0权重（除非是障碍物）
+        weights_matrix = np.maximum(weights_matrix, 1)
+        
+        # 将障碍物标记为0
+        weights_matrix[self.env.cost_map >= max_finite_cost * 5] = 0
+        
+        # 打印调试信息
+        print(f"权重矩阵类型: {weights_matrix.dtype}")
+        print(f"权重范围: [{np.min(weights_matrix)}, {np.max(weights_matrix)}]")
+        if np.isnan(weights_matrix).any():
+            print("警告：权重矩阵中存在NaN值！")
+        if np.isinf(weights_matrix).any():
+            print("警告：权重矩阵中存在Inf值！")
+            
+        # 创建网格对象
+        grid = Grid(matrix=weights_matrix.tolist())
+        
+        # 创建寻路器
+        finder = AStarFinder(
+            diagonal_movement=DiagonalMovement.always,
+            weight=1,
+            heuristic=lambda dx, dy: max(abs(dx), abs(dy))  # 切比雪夫距离
         )
         
-        # 初始化起点
-        start_node = Node(start[0], start[1], 0, self.heuristic(start, goal))
+        # 获取起点和终点
+        start_node = grid.node(start[1], start[0])
+        end_node = grid.node(goal[1], goal[0])
         
-        # 使用优先队列和集合来优化搜索
-        open_list = []
-        heapq.heappush(open_list, start_node)
-        closed_set = set()
+        # 寻找路径
+        path, _ = finder.find_path(start_node, end_node, grid)
         
-        # 使用字典记录每个位置的g值，用于快速更新
-        g_values = {(start[0], start[1]): 0}
+        # 如果找到路径，转换坐标格式
+        if path:
+            return [(node.y, node.x) for node in path]  # 转换为(row,col)格式
         
-        iterations = 0
-        best_distance = float('inf')
-        best_node = None
-        
-        while open_list and iterations < self.max_iterations:
-            iterations += 1
-            
-            current = heapq.heappop(open_list)
-            current_pos = (current.row, current.col)
-            
-            # 如果找到目标
-            if current_pos == goal:
-                path = []
-                while current:
-                    path.append((current.row, current.col))
-                    current = current.parent
-                return path[::-1]
-            
-            # 如果已经访问过，跳过
-            if current_pos in closed_set:
-                continue
-            
-            # 计算到目标的直线距离
-            current_distance = np.sqrt(
-                (goal[0] - current.row)**2 + 
-                (goal[1] - current.col)**2
-            )
-            
-            # 更新最佳距离
-            if current_distance < best_distance:
-                best_distance = current_distance
-                best_node = current
-            
-            # 如果当前路径长度已经超过直线距离的2倍，考虑使用之前找到的最佳点
-            if current.g_cost > 2 * direct_distance and best_node:
-                path = []
-                current = best_node
-                while current:
-                    path.append((current.row, current.col))
-                    current = current.parent
-                return path[::-1]
-            
-            closed_set.add(current_pos)
-            
-            # 检查所有邻居
-            for next_row, next_col, cost in self.get_neighbors(current):
-                next_pos = (next_row, next_col)
-                
-                # 如果已经访问过，跳过
-                if next_pos in closed_set:
-                    continue
-                
-                # 计算新的g值
-                new_g = g_values[current_pos] + cost
-                
-                # 如果这个位置已经有更好的路径，跳过
-                if next_pos in g_values and new_g >= g_values[next_pos]:
-                    continue
-                
-                # 更新g值并添加到开放列表
-                g_values[next_pos] = new_g
-                h = self.heuristic(next_pos, goal)
-                neighbor = Node(next_row, next_col, new_g, h, current)
-                heapq.heappush(open_list, neighbor)
-        
-        # 如果达到最大迭代次数但找到了较好的路径，返回该路径
-        if best_node and iterations >= self.max_iterations:
-            print(f"    警告：达到最大迭代次数 {self.max_iterations}，返回次优路径")
-            path = []
-            current = best_node
-            while current:
-                path.append((current.row, current.col))
-                current = current.parent
-            return path[::-1]
-        
-        # 完全找不到路径
-        print(f"    警告：达到最大迭代次数 {self.max_iterations}")
         return None
         
     def smooth_path(

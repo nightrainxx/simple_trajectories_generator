@@ -56,6 +56,8 @@ class MapGenerator:
         self.crs = None
         self.base_speed_map = None
         self.cost_map = None
+        self.width = None
+        self.height = None
         self.base_speeds = {
             10: 1.4,  # 水域
             20: 1.4,  # 城市
@@ -76,6 +78,8 @@ class MapGenerator:
             self.landcover = src.read(1)
             self.transform = src.transform
             self.crs = src.crs
+            self.width = src.width
+            self.height = src.height
             
         # 加载高程数据
         elevation_path = "data/input/dem_30m_100km.tif"
@@ -236,12 +240,31 @@ class MapGenerator:
         # 应用坡向约束
         speed_map = self.apply_slope_aspect_constraints(heading_degrees)
         
+        # 设置一个极小的速度阈值，避免除零
+        min_speed = 1e-6
+        
         # 计算成本图
         self.cost_map = np.where(
-            speed_map > 1e-6,
-            1.0 / speed_map,  # 成本为单位距离所需时间
+            speed_map > min_speed,
+            1.0 / np.maximum(speed_map, min_speed),  # 确保分母不为0
             max_cost  # 不可通行区域设置较大成本
         )
+        
+        # 检查并处理异常值
+        if np.isnan(self.cost_map).any():
+            print("警告：成本图中存在NaN值，将其替换为最大成本")
+            self.cost_map[np.isnan(self.cost_map)] = max_cost
+            
+        if np.isinf(self.cost_map).any():
+            print("警告：成本图中存在Inf值，将其替换为最大成本")
+            self.cost_map[np.isinf(self.cost_map)] = max_cost
+            
+        if (self.cost_map < 0).any():
+            print("警告：成本图中存在负值，将其替换为最大成本")
+            self.cost_map[self.cost_map < 0] = max_cost
+            
+        # 确保成本图中的值都是有限的
+        self.cost_map = np.clip(self.cost_map, 0, max_cost)
         
         return self.cost_map
         
