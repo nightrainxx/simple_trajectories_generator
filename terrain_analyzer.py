@@ -50,23 +50,44 @@ class TerrainAnalyzer:
         if self.dem is None:
             raise ValueError("请先加载DEM数据")
             
-        # 获取像素大小
-        pixel_size_x = abs(self.transform[0])
-        pixel_size_y = abs(self.transform[4])
+        # 使用固定的栅格大小(30米)
+        pixel_size = 30.0
         
-        # 计算梯度
-        dy, dx = np.gradient(self.dem, pixel_size_y, pixel_size_x)
+        # 计算x和y方向的高程梯度(米/米)
+        dy, dx = np.gradient(self.dem, pixel_size)
         
         # 计算坡度(度)
-        self.slope = np.degrees(np.arctan(np.sqrt(dx**2 + dy**2)))
+        # slope = arctan(sqrt(dx^2 + dy^2))
+        slope = np.degrees(np.arctan(np.sqrt(dx**2 + dy**2)))
         
         # 计算坡向(度)
-        self.aspect = np.degrees(np.arctan2(-dx, dy))
+        # aspect = arctan2(-dx, dy)  # 使用-dx是因为我们要得到与y轴的夹角
+        aspect = np.degrees(np.arctan2(-dx, dy))
         # 转换为地理坡向(北为0，顺时针)
-        self.aspect = 90.0 - self.aspect
-        self.aspect = np.where(self.aspect < 0, self.aspect + 360, self.aspect)
+        aspect = 90.0 - aspect
+        aspect = np.where(aspect < 0, aspect + 360, aspect)
         
-        return self.slope, self.aspect
+        # 保存结果
+        self.slope = slope
+        self.aspect = aspect
+        
+        # 打印坡度统计信息
+        print("\n坡度统计信息:")
+        print(f"最小值: {np.nanmin(slope):.2f}°")
+        print(f"最大值: {np.nanmax(slope):.2f}°")
+        print(f"平均值: {np.nanmean(slope):.2f}°")
+        print(f"中位数: {np.nanmedian(slope):.2f}°")
+        print(f"标准差: {np.nanstd(slope):.2f}°")
+        
+        # 打印坡度分布
+        bins = [0, 5, 15, 30, 45, np.inf]
+        labels = ['平地', '缓坡', '中坡', '陡坡', '峭壁']
+        hist, _ = np.histogram(slope[~np.isnan(slope)], bins=bins)
+        print("\n坡度分布:")
+        for i, (count, label) in enumerate(zip(hist, labels)):
+            print(f"{label}: {count} 像素 ({count/slope.size*100:.2f}%)")
+        
+        return slope, aspect
         
     def save_results(
         self,
