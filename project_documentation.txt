@@ -1,0 +1,3753 @@
+项目文档生成时间: 2025-03-28 15:11:11
+
+================================================================================
+项目结构树:
+================================================================================
+├── simple_trajectories_generator/
+│   ├── calculate_slope.py
+│   ├── check_slope.py
+│   ├── collect_project_info.py
+│   ├── config.py
+│   ├── environment.py
+│   ├── environment_mapper.py
+│   ├── generate_all_trajectories.py
+│   ├── main.py
+│   ├── map_generator.py
+│   ├── path_planner.py
+│   ├── plot_style.py
+│   ├── point_selector.py
+│   ├── readme.md
+│   ├── requirements.txt
+│   ├── terrain_analyzer.py
+│   ├── test_data.py
+│   ├── trajectory_generator.py
+│   ├── utils.py
+│   ├── visualizer.py
+│   ├── visualize_trajectories.py
+│   ├── 作图规范.md
+│   ├── data/
+│   │   ├── core_trajectories/
+│   │   ├── input/
+│   │   │   ├── gis/
+│   │   ├── output/
+│   │   │   ├── evaluation_report_001/
+│   │   │   ├── intermediate/
+│   │   │   ├── maps/
+│   │   │   ├── synthetic_batch_001/
+│   │   │   ├── terrain_analysis/
+│   │   │   ├── trajectories/
+│   │   ├── paths/
+│   │   ├── raw/
+│   │   │   ├── dem/
+│   ├── docs/
+│   │   ├── path_planning_issues.md
+
+================================================================================
+文件: calculate_slope.py
+================================================================================
+"""
+从DEM数据计算坡度和坡向
+
+输入:
+- DEM数据文件 (data/input/dem_30m_100km.tif)
+
+输出:
+- 坡度数据文件 (data/input/slope_30m_100km.tif)
+- 坡向数据文件 (data/input/aspect_30m_100km.tif)
+"""
+
+import os
+import numpy as np
+import rasterio
+from terrain_analyzer import TerrainAnalyzer
+from config import INPUT_DIR
+
+def main():
+    """主函数"""
+    print("开始从DEM计算坡度和坡向...")
+    
+    # 输入输出文件路径
+    dem_path = os.path.join(INPUT_DIR, "dem_30m_100km.tif")
+    slope_path = os.path.join(INPUT_DIR, "slope_30m_100km.tif")
+    aspect_path = os.path.join(INPUT_DIR, "aspect_30m_100km.tif")
+    
+    # 创建TerrainAnalyzer实例
+    analyzer = TerrainAnalyzer()
+    
+    # 加载DEM数据
+    print(f"\n读取DEM文件: {dem_path}")
+    analyzer.load_dem(dem_path)
+    
+    # 计算坡度和坡向
+    print("\n计算坡度和坡向...")
+    slope, aspect = analyzer.calculate_slope_aspect()
+    
+    # 保存结果
+    print("\n保存计算结果...")
+    analyzer.save_results(slope_path, aspect_path)
+    print(f"坡度数据已保存至: {slope_path}")
+    print(f"坡向数据已保存至: {aspect_path}")
+    
+    print("\n计算完成!")
+
+if __name__ == "__main__":
+    main() 
+
+================================================================================
+文件: check_slope.py
+================================================================================
+import rasterio
+import numpy as np
+import os
+
+def check_slope_data():
+    """检查坡度数据文件"""
+    print("开始检查坡度数据...")
+    
+    slope_path = os.path.join("data", "input", "slope_30m_100km.tif")
+    print(f"读取坡度文件: {slope_path}")
+    
+    try:
+        with rasterio.open(slope_path) as src:
+            data = src.read(1)
+            
+            print("\n基本信息:")
+            print(f"数据形状: {data.shape}")
+            print(f"数据类型: {data.dtype}")
+            print(f"最小值: {np.min(data):.2f}")
+            print(f"最大值: {np.max(data):.2f}")
+            print(f"平均值: {np.mean(data):.2f}")
+            print(f"中位数: {np.median(data):.2f}")
+            print(f"标准差: {np.std(data):.2f}")
+            
+            print("\n数据统计:")
+            print(f"0值数量: {np.sum(data == 0)}")
+            print(f"负值数量: {np.sum(data < 0)}")
+            print(f"大于45度数量: {np.sum(data > 45)}")
+            print(f"NaN数量: {np.sum(np.isnan(data))}")
+            
+            print("\n坡度分布:")
+            bins = [0, 5, 15, 30, 45, np.inf]
+            labels = ['平地', '缓坡', '中坡', '陡坡', '峭壁']
+            hist, _ = np.histogram(data[~np.isnan(data)], bins=bins)
+            for i, (count, label) in enumerate(zip(hist, labels)):
+                print(f"  {label}: {count} 像素 ({count/data.size*100:.2f}%)")
+                
+            # 添加一些详细的分布信息
+            print("\n详细分布:")
+            percentiles = [0, 10, 25, 50, 75, 90, 100]
+            for p in percentiles:
+                value = np.percentile(data[~np.isnan(data)], p)
+                print(f"  {p}百分位: {value:.2f}°")
+                
+    except Exception as e:
+        print(f"错误: {e}")
+
+if __name__ == "__main__":
+    check_slope_data() 
+
+================================================================================
+文件: collect_project_info.py
+================================================================================
+import os
+import datetime
+
+def get_file_content(file_path):
+    """读取文件内容"""
+    try:
+        with open(file_path, 'r', encoding='utf-8') as f:
+            return f.read()
+    except Exception as e:
+        return f"Error reading file {file_path}: {str(e)}"
+
+def generate_directory_tree(startpath, ignore_dirs=['.git', '__pycache__', '.pytest_cache']):
+    """生成目录树"""
+    tree = []
+    for root, dirs, files in os.walk(startpath):
+        # 过滤掉不需要的目录
+        dirs[:] = [d for d in dirs if d not in ignore_dirs]
+        
+        level = root.replace(startpath, '').count(os.sep)
+        indent = '│   ' * (level)
+        tree.append(f'{indent}├── {os.path.basename(root)}/')
+        
+        subindent = '│   ' * (level + 1)
+        for f in files:
+            if f.endswith('.py') or f.endswith('.md') or f == 'requirements.txt':
+                tree.append(f'{subindent}├── {f}')
+    
+    return '\n'.join(tree)
+
+def collect_project_info():
+    """收集项目信息并保存到文件"""
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    output_file = os.path.join(current_dir, 'project_documentation.txt')
+    
+    with open(output_file, 'w', encoding='utf-8') as f:
+        # 写入时间戳
+        f.write(f"项目文档生成时间: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n")
+        
+        # 写入项目结构
+        f.write("="*80 + "\n")
+        f.write("项目结构树:\n")
+        f.write("="*80 + "\n")
+        f.write(generate_directory_tree(current_dir))
+        f.write("\n\n")
+        
+        # 收集并写入所有代码文件内容
+        for root, _, files in os.walk(current_dir):
+            for file in files:
+                if file.endswith('.py') or file.endswith('.md') or file == 'requirements.txt':
+                    file_path = os.path.join(root, file)
+                    relative_path = os.path.relpath(file_path, current_dir)
+                    
+                    f.write("="*80 + "\n")
+                    f.write(f"文件: {relative_path}\n")
+                    f.write("="*80 + "\n")
+                    f.write(get_file_content(file_path))
+                    f.write("\n\n")
+
+if __name__ == "__main__":
+    collect_project_info()
+    print("项目文档已生成完成，请查看 project_documentation.txt 文件") 
+
+================================================================================
+文件: config.py
+================================================================================
+"""
+配置文件：定义所有项目参数和规则
+
+包含:
+- 文件路径配置
+- 轨迹生成参数
+- 地形规则
+- 速度规则
+- 坡向约束参数
+"""
+
+import os
+from pathlib import Path
+
+# 项目根目录
+PROJECT_ROOT = Path(__file__).parent.absolute()
+
+# 数据目录
+DATA_DIR = os.path.join(PROJECT_ROOT, "data")
+INPUT_DIR = os.path.join(DATA_DIR, "input")
+OUTPUT_DIR = os.path.join(DATA_DIR, "output")
+INTERMEDIATE_DIR = os.path.join(OUTPUT_DIR, "intermediate")
+
+# 确保输出目录存在
+os.makedirs(OUTPUT_DIR, exist_ok=True)
+
+# 输入文件路径
+DEM_PATH = os.path.join(INPUT_DIR, "dem_30m_100km.tif")
+SLOPE_PATH = os.path.join(INPUT_DIR, "slope_30m_100km.tif")
+ASPECT_PATH = os.path.join(INPUT_DIR, "aspect_30m_100km.tif")
+LANDCOVER_PATH = os.path.join(INPUT_DIR, "landcover_30m_100km.tif")
+
+# 输出文件路径
+SPEED_MAP_PATH = os.path.join(INTERMEDIATE_DIR, "base_speed_map.tif")
+COST_MAP_PATH = os.path.join(INTERMEDIATE_DIR, "cost_map.tif")
+TRAJECTORY_PATH = os.path.join(OUTPUT_DIR, "trajectory.csv")
+
+# 批量生成参数
+NUM_TRAJECTORIES_TO_GENERATE = 500  # 要生成的轨迹总数
+NUM_END_POINTS = 3                  # 要选择的固定终点数量
+MIN_START_END_DISTANCE_METERS = 80000  # 起终点最小直线距离(米)
+
+# 地物编码定义
+URBAN_LANDCOVER_CODES = [10]  # 城市/建成区编码
+IMPASSABLE_LANDCOVER_CODES = [60]  # 不可通行区域编码(如水体)
+
+# 坡度分类参数
+SLOPE_BINS = [-1, 5, 15, 30, 45, 91]  # 坡度分类边界值
+SLOPE_LABELS = [0, 1, 2, 3, 4]  # 对应平地, 缓坡, 中坡, 陡坡, 峭壁
+
+# 土地覆盖类型编码 (根据实际数据更新)
+LANDCOVER_CODES = {
+    10: "耕地",
+    20: "林地",
+    30: "草地",
+    40: "灌木地",
+    50: "湿地",
+    60: "水体",
+    80: "建设用地",
+    90: "裸地",
+    255: "未分类"
+}
+
+# 不可通行的土地类型
+IMPASSABLE_TYPES = [60]  # 水体
+
+# 速度规则（土地类型, 坡度）-> 速度(米/秒)
+SPEED_RULES = {
+    # 耕地
+    (10, 0): 8.3,  # 0-5°, 30km/h
+    (10, 1): 5.6,  # 5-15°, 20km/h
+    (10, 2): 2.8,  # 15-25°, 10km/h
+    (10, 3): 1.4,  # 25-35°, 5km/h
+    (10, 4): 0.0,  # >35°, 不可通行
+    
+    # 林地
+    (20, 0): 5.6,  # 0-5°, 20km/h
+    (20, 1): 4.2,  # 5-15°, 15km/h
+    (20, 2): 2.8,  # 15-25°, 10km/h
+    (20, 3): 1.4,  # 25-35°, 5km/h
+    (20, 4): 0.0,  # >35°, 不可通行
+    
+    # 草地
+    (30, 0): 11.1,  # 0-5°, 40km/h
+    (30, 1): 8.3,  # 5-15°, 30km/h
+    (30, 2): 5.6,  # 15-25°, 20km/h
+    (30, 3): 2.8,  # 25-35°, 10km/h
+    (30, 4): 0.0,  # >35°, 不可通行
+    
+    # 灌木地
+    (40, 0): 8.3,  # 0-5°, 30km/h
+    (40, 1): 5.6,  # 5-15°, 20km/h
+    (40, 2): 2.8,  # 15-25°, 10km/h
+    (40, 3): 1.4,  # 25-35°, 5km/h
+    (40, 4): 0.0,  # >35°, 不可通行
+    
+    # 湿地
+    (50, 0): 8.3,  # 0-5°, 30km/h
+    (50, 1): 5.6,  # 5-15°, 20km/h
+    (50, 2): 2.8,  # 15-25°, 10km/h
+    (50, 3): 1.4,  # 25-35°, 5km/h
+    (50, 4): 0.0,  # >35°, 不可通行
+    
+    # 水体
+    (60, 0): 0.0,  # 不可通行
+    (60, 1): 0.0,
+    (60, 2): 0.0,
+    (60, 3): 0.0,
+    (60, 4): 0.0,
+    
+    # 建设用地
+    (80, 0): 13.9,  # 0-5°, 50km/h
+    (80, 1): 11.1,  # 5-15°, 40km/h
+    (80, 2): 8.3,  # 15-25°, 30km/h
+    (80, 3): 5.6,  # 25-35°, 20km/h
+    (80, 4): 0.0,  # >35°, 不可通行
+    
+    # 裸地
+    (90, 0): 11.1,  # 0-5°, 40km/h
+    (90, 1): 8.3,  # 5-15°, 30km/h
+    (90, 2): 5.6,  # 15-25°, 20km/h
+    (90, 3): 2.8,  # 25-35°, 10km/h
+    (90, 4): 0.0,  # >35°, 不可通行
+    
+    # 未分类
+    (255, 0): 5.6,  # 默认 20km/h
+    (255, 1): 4.2,
+    (255, 2): 2.8,
+    (255, 3): 1.4,
+    (255, 4): 0.0
+}
+
+# 坡度分级（度）
+SLOPE_LEVELS = [5, 15, 25, 35]
+
+# 轨迹生成参数
+TARGET_LENGTH_RANGE = [80000, 120000]  # 目标轨迹长度范围(米)
+DEFAULT_TARGET_SPEED = 30  # 默认目标平均速度(km/h)
+
+# 模拟参数
+DT = 1.0  # 时间步长(秒)
+MAX_ACCELERATION = 1.0  # 最大加速度(m/s^2)
+MAX_DECELERATION = -2.0  # 最大减速度(m/s^2)
+MAX_TURNING_RATE = 30.0  # 最大转向率(度/秒)
+
+# 输出目录
+BATCH_OUTPUT_DIR = os.path.join(OUTPUT_DIR, "synthetic_batch_{}")
+EVALUATION_DIR = os.path.join(OUTPUT_DIR, "evaluation_report_{}")
+
+# 创建必要的目录
+for directory in [INPUT_DIR, OUTPUT_DIR, INTERMEDIATE_DIR]:
+    os.makedirs(directory, exist_ok=True)
+
+# 坡度影响因子
+ASPECT_UPHILL_REDUCTION_K = 0.05  # 上坡减速系数
+ASPECT_CROSS_REDUCTION_K = 0.01  # 横坡减速系数
+MAX_CROSS_SLOPE_DEGREES = 30.0  # 最大横坡角度
+MAX_BRAKING_SPEED_DOWNHILL = 5.6  # 下坡最大制动速度（米/秒） 
+
+================================================================================
+文件: environment.py
+================================================================================
+"""
+环境模块: 负责加载和处理环境数据,定义移动规则
+
+包含:
+- 环境数据加载和预处理
+- 坡度分类
+- 速度规则应用
+"""
+
+import numpy as np
+import rasterio
+from typing import Tuple, Dict, Optional
+from config import (
+    DEM_PATH, SLOPE_PATH, LANDCOVER_PATH,
+    SLOPE_BINS, SLOPE_LABELS, SPEED_RULES,
+    DEFAULT_SPEED_MPS
+)
+
+class Environment:
+    """环境类: 管理环境数据和移动规则"""
+    
+    def __init__(self):
+        """初始化环境对象"""
+        self.dem = None
+        self.slope = None
+        self.landcover = None
+        self.transform = None
+        self.crs = None
+        self.shape = None
+        self.cost_map = None
+        self.width = None
+        self.height = None
+        
+    def load_data(self) -> None:
+        """
+        加载环境数据(DEM、坡度、土地覆盖)
+        """
+        # 加载DEM
+        with rasterio.open(DEM_PATH) as src:
+            self.dem = src.read(1)
+            self.transform = src.transform
+            self.crs = src.crs
+            self.shape = self.dem.shape
+            self.width = src.width
+            self.height = src.height
+            
+            # 处理DEM的NoData值
+            self.dem = np.where(
+                self.dem < -1e30,
+                np.nan,
+                self.dem
+            )
+            
+        # 加载坡度
+        with rasterio.open(SLOPE_PATH) as src:
+            self.slope = src.read(1)
+            
+            # 处理坡度的NoData值
+            self.slope = np.where(
+                self.slope < -999,
+                np.nan,
+                self.slope
+            )
+            
+            # 打印坡度数据的基本信息
+            print("\n坡度数据信息:")
+            print(f"  形状: {self.slope.shape}")
+            print(f"  数据类型: {self.slope.dtype}")
+            print(f"  最小值: {np.nanmin(self.slope):.2f}°")
+            print(f"  最大值: {np.nanmax(self.slope):.2f}°")
+            print(f"  平均值: {np.nanmean(self.slope):.2f}°")
+            print(f"  中位数: {np.nanmedian(self.slope):.2f}°")
+            print(f"  标准差: {np.nanstd(self.slope):.2f}°")
+            print(f"  NaN数量: {np.sum(np.isnan(self.slope))}")
+            print(f"  0值数量: {np.sum(self.slope == 0)}")
+            print(f"  负值数量: {np.sum(self.slope < 0)}")
+            print(f"  大于45度数量: {np.sum(self.slope > 45)}")
+            
+            # 打印坡度分布
+            bins = [0, 5, 15, 30, 45, np.inf]
+            labels = ['平地', '缓坡', '中坡', '陡坡', '峭壁']
+            hist, _ = np.histogram(self.slope[~np.isnan(self.slope)], bins=bins)
+            print("\n坡度分布:")
+            for i, (count, label) in enumerate(zip(hist, labels)):
+                print(f"  {label}: {count} 像素 ({count/self.slope.size*100:.2f}%)")
+            
+        # 加载土地覆盖
+        with rasterio.open(LANDCOVER_PATH) as src:
+            self.landcover = src.read(1)
+            
+        # 验证数据形状一致性
+        assert self.dem.shape == self.slope.shape == self.landcover.shape, \
+            "输入栅格数据形状不一致"
+            
+        # 生成成本图
+        self.generate_cost_map()
+            
+    def generate_cost_map(self) -> None:
+        """
+        生成成本图
+        """
+        if not self.validate_data():
+            raise ValueError("环境数据无效，无法生成成本图")
+            
+        # 初始化成本图
+        self.cost_map = np.full(self.shape, np.inf, dtype=np.float32)
+        
+        # 遍历每个像素
+        for row in range(self.height):
+            for col in range(self.width):
+                # 如果是水体，设置为无穷大
+                if self.landcover[row, col] == 60:
+                    continue
+                    
+                # 如果坡度大于45度，设置为无穷大
+                if self.slope[row, col] > 45:
+                    continue
+                    
+                # 获取基础速度
+                speed = self.get_pixel_speed(row, col)
+                
+                # 如果速度大于0，计算成本
+                if speed > 0:
+                    # 成本 = 距离/速度
+                    # 这里假设像素大小为30米
+                    self.cost_map[row, col] = 30.0 / speed
+                else:
+                    # 如果速度为0，设置一个较大但有限的成本
+                    self.cost_map[row, col] = 1000.0
+                    
+        print("成本图生成完成")
+        print(f"成本范围: [{np.min(self.cost_map)}, {np.max(self.cost_map)}]")
+        print(f"无穷大值数量: {np.sum(np.isinf(self.cost_map))}")
+
+    def classify_slope(self, slope_value: float) -> int:
+        """
+        将坡度值分类为坡度等级
+
+        参数:
+            slope_value: 坡度值(度)
+
+        返回:
+            坡度等级(0-4)
+        """
+        if np.isnan(slope_value):
+            print(f"警告: 遇到NaN坡度值")
+            return len(SLOPE_LABELS) - 1  # 将NoData值归类为最高坡度等级(不可通行)
+        
+        # 打印坡度值和分类结果
+        slope_class = np.digitize(slope_value, SLOPE_BINS) - 1
+        print(f"坡度值: {slope_value:.2f}°, 分类等级: {slope_class}")
+        return slope_class
+    
+    def get_speed(
+        self,
+        landcover_code: int,
+        slope_label: int
+    ) -> float:
+        """
+        根据土地覆盖类型和坡度等级获取移动速度
+
+        参数:
+            landcover_code: 土地覆盖类型编码
+            slope_label: 坡度等级(0-4)
+
+        返回:
+            移动速度(米/秒)
+        """
+        return SPEED_RULES.get(
+            (landcover_code, slope_label),
+            DEFAULT_SPEED_MPS
+        )
+    
+    def get_pixel_speed(self, row: int, col: int) -> float:
+        """
+        获取指定像素位置的移动速度
+
+        参数:
+            row: 像素行号
+            col: 像素列号
+
+        返回:
+            移动速度(米/秒)
+        """
+        # 获取该位置的坡度和土地覆盖类型
+        slope_value = self.slope[row, col]
+        landcover_code = self.landcover[row, col]
+        
+        # 如果是水体，返回0速度
+        if landcover_code == 60:
+            return 0.0
+        
+        # 如果坡度大于45度，返回0速度
+        if slope_value > 45:
+            return 0.0
+        
+        # 分类坡度
+        slope_label = self.classify_slope(slope_value)
+        
+        # 获取速度规则
+        speed = SPEED_RULES.get((landcover_code, slope_label))
+        
+        # 如果没有对应的规则，使用默认速度
+        if speed is None:
+            print(f"警告: 位置({row}, {col})的土地类型{landcover_code}和坡度等级{slope_label}没有对应的速度规则，使用默认速度")
+            speed = DEFAULT_SPEED_MPS
+        
+        return speed
+    
+    def validate_data(self) -> bool:
+        """
+        验证环境数据的有效性
+
+        返回:
+            数据是否有效
+        """
+        if any(x is None for x in [
+            self.dem, self.slope, self.landcover,
+            self.transform, self.crs
+        ]):
+            print("部分数据未加载")
+            return False
+            
+        # 检查数据范围
+        valid_slope = np.logical_or(
+            np.isnan(self.slope),
+            np.logical_and(
+                self.slope >= 0,
+                self.slope <= 90
+            )
+        ).all()
+        
+        if not valid_slope:
+            print("坡度数据范围无效")
+            return False
+            
+        # 检查土地覆盖编码
+        unique_codes = np.unique(self.landcover)
+        print(f"土地覆盖编码: {unique_codes}")
+        
+        # 检查每个编码是否有对应的速度规则
+        for code in unique_codes:
+            if not any((code, slope_label) in SPEED_RULES for slope_label in SLOPE_LABELS):
+                print(f"土地覆盖编码 {code} 没有对应的速度规则")
+                return False
+            
+        return True 
+
+================================================================================
+文件: environment_mapper.py
+================================================================================
+"""
+环境地图生成器模块：负责构建基础速度图和成本图
+
+输入：
+- 土地覆盖数据
+- 坡度数据
+- 坡向数据
+
+输出：
+- 基础速度图
+- 成本图
+
+处理流程：
+1. 加载环境数据
+2. 根据规则计算基础速度
+3. 应用坡度影响生成成本图
+"""
+
+import os
+import numpy as np
+import rasterio
+from typing import Tuple, Optional
+from config import (
+    INPUT_DIR,
+    LANDCOVER_PATH,
+    SLOPE_PATH,
+    ASPECT_PATH,
+    BASE_SPEED_RULES,
+    SLOPE_SPEED_REDUCTION_FACTOR,
+    IMPASSABLE_LANDCOVER_CODES,
+    MAX_CROSS_SLOPE_DEGREES
+)
+
+class EnvironmentMapper:
+    """环境地图生成器类"""
+    
+    def __init__(self):
+        """初始化环境地图生成器"""
+        self.landcover = None
+        self.slope = None
+        self.aspect = None
+        self.transform = None
+        self.crs = None
+        self.base_speed_map = None
+        self.cost_map = None
+        
+    def load_data(self) -> None:
+        """加载环境数据"""
+        print("加载环境数据...")
+        
+        # 加载土地覆盖数据
+        with rasterio.open(LANDCOVER_PATH) as src:
+            self.landcover = src.read(1)
+            self.transform = src.transform
+            self.crs = src.crs
+            print(f"土地覆盖数据形状: {self.landcover.shape}")
+            print(f"土地覆盖类型: {np.unique(self.landcover)}")
+            
+        # 加载坡度数据
+        with rasterio.open(SLOPE_PATH) as src:
+            self.slope = src.read(1)
+            print(f"\n坡度数据统计:")
+            print(f"最小值: {np.nanmin(self.slope):.2f}°")
+            print(f"最大值: {np.nanmax(self.slope):.2f}°")
+            print(f"平均值: {np.nanmean(self.slope):.2f}°")
+            
+        # 加载坡向数据
+        with rasterio.open(ASPECT_PATH) as src:
+            self.aspect = src.read(1)
+            print(f"\n坡向数据范围: [{np.nanmin(self.aspect):.2f}°, {np.nanmax(self.aspect):.2f}°]")
+            
+    def calculate_base_speed_map(self) -> np.ndarray:
+        """
+        计算基础速度图
+        
+        返回:
+            base_speed_map: 基础速度数组 (m/s)
+        """
+        print("\n计算基础速度图...")
+        
+        # 初始化基础速度图
+        self.base_speed_map = np.zeros_like(self.landcover, dtype=np.float32)
+        
+        # 应用土地覆盖规则
+        for code, speed in BASE_SPEED_RULES.items():
+            mask = (self.landcover == code)
+            self.base_speed_map[mask] = speed
+            
+        # 标记不可通行区域
+        for code in IMPASSABLE_LANDCOVER_CODES:
+            mask = (self.landcover == code)
+            self.base_speed_map[mask] = 0
+            
+        print(f"基础速度范围: [{np.min(self.base_speed_map):.2f}, {np.max(self.base_speed_map):.2f}] m/s")
+        
+        return self.base_speed_map
+        
+    def calculate_cost_map(self) -> np.ndarray:
+        """
+        计算成本图
+        
+        返回:
+            cost_map: 成本数组 (秒/米)
+        """
+        print("\n计算成本图...")
+        
+        if self.base_speed_map is None:
+            self.calculate_base_speed_map()
+            
+        # 初始化成本图
+        self.cost_map = np.full_like(self.base_speed_map, np.inf, dtype=np.float32)
+        
+        # 计算坡度影响因子
+        slope_factor = np.exp(SLOPE_SPEED_REDUCTION_FACTOR * self.slope)
+        
+        # 计算有效速度（考虑坡度影响）
+        valid_mask = (self.base_speed_map > 0)
+        self.cost_map[valid_mask] = 1.0 / (self.base_speed_map[valid_mask] / slope_factor[valid_mask])
+        
+        # 标记不可通行区域（坡度过大）
+        steep_mask = (self.slope > MAX_CROSS_SLOPE_DEGREES)
+        self.cost_map[steep_mask] = np.inf
+        
+        # 统计信息
+        finite_costs = self.cost_map[np.isfinite(self.cost_map)]
+        print(f"成本范围: [{np.min(finite_costs):.2f}, {np.max(finite_costs):.2f}]")
+        print(f"无穷大成本数量: {np.sum(np.isinf(self.cost_map))}")
+        
+        return self.cost_map
+        
+    def save_maps(self, output_dir: str) -> None:
+        """
+        保存地图
+
+        参数:
+            output_dir: 输出目录
+        """
+        if self.base_speed_map is None or self.cost_map is None:
+            raise ValueError("请先计算速度图和成本图")
+            
+        os.makedirs(output_dir, exist_ok=True)
+        
+        # 保存基础速度图
+        with rasterio.open(
+            os.path.join(output_dir, 'base_speed_map.tif'),
+            'w',
+            driver='GTiff',
+            height=self.base_speed_map.shape[0],
+            width=self.base_speed_map.shape[1],
+            count=1,
+            dtype=self.base_speed_map.dtype,
+            crs=self.crs,
+            transform=self.transform
+        ) as dst:
+            dst.write(self.base_speed_map, 1)
+            
+        # 保存成本图
+        with rasterio.open(
+            os.path.join(output_dir, 'cost_map.tif'),
+            'w',
+            driver='GTiff',
+            height=self.cost_map.shape[0],
+            width=self.cost_map.shape[1],
+            count=1,
+            dtype=self.cost_map.dtype,
+            crs=self.crs,
+            transform=self.transform
+        ) as dst:
+            dst.write(self.cost_map, 1)
+            
+def main():
+    """主函数：运行环境地图生成流程"""
+    # 创建环境地图生成器
+    mapper = EnvironmentMapper()
+    
+    # 加载数据
+    mapper.load_data()
+    
+    # 计算基础速度图
+    mapper.calculate_base_speed_map()
+    
+    # 计算成本图
+    mapper.calculate_cost_map()
+    
+    # 保存结果
+    output_dir = os.path.join("data", "output", "intermediate")
+    mapper.save_maps(output_dir)
+    
+    print("\n环境地图生成完成！")
+    
+if __name__ == "__main__":
+    main() 
+
+================================================================================
+文件: generate_all_trajectories.py
+================================================================================
+"""
+批量轨迹生成脚本
+
+输入：
+- start_end_pairs.csv：起终点对数据
+- base_speed_map.tif：基础速度图
+- slope_30m_100km.tif：坡度数据
+- aspect_30m_100km.tif：坡向数据
+
+输出：
+- trajectories/trajectory_{id}.csv：轨迹数据文件
+"""
+
+import os
+import pandas as pd
+from path_planner import PathPlanner
+from trajectory_generator import TrajectoryGenerator
+from config import OUTPUT_DIR
+
+def main():
+    """主函数"""
+    print("开始批量生成轨迹...")
+    
+    # 加载起终点对数据
+    pairs_path = os.path.join(OUTPUT_DIR, "start_end_pairs.csv")
+    if not os.path.exists(pairs_path):
+        print(f"错误：找不到起终点对数据文件 {pairs_path}")
+        return
+        
+    pairs_df = pd.read_csv(pairs_path)
+    print(f"加载了{len(pairs_df)}对起终点")
+    
+    # 创建路径规划器
+    planner = PathPlanner()
+    planner.load_cost_map()
+    
+    # 创建轨迹生成器
+    generator = TrajectoryGenerator()
+    generator.load_data()
+    
+    # 为每对起终点生成轨迹
+    success_count = 0
+    for idx, row in pairs_df.iterrows():
+        start = (int(row['start_row']), int(row['start_col']))
+        end = (int(row['end_row']), int(row['end_col']))
+        
+        print(f"\n处理第{idx}对起终点:")
+        print(f"  起点: {start}")
+        print(f"  终点: {end}")
+        
+        # 规划路径
+        path, cost = planner.find_path(start, end)
+        if not path:
+            print("  未找到可行路径，跳过")
+            continue
+            
+        print(f"  找到路径，长度: {len(path)}个点")
+        print(f"  路径总成本: {cost:.2f}")
+        
+        # 生成轨迹
+        try:
+            df = generator.generate_trajectory(path, trajectory_id=idx)
+            generator.save_trajectory(df, trajectory_id=idx)
+            success_count += 1
+        except Exception as e:
+            print(f"  生成轨迹时出错: {e}")
+            continue
+            
+    print(f"\n轨迹生成完成:")
+    print(f"  成功: {success_count}条")
+    print(f"  失败: {len(pairs_df) - success_count}条")
+    
+if __name__ == "__main__":
+    main() 
+
+================================================================================
+文件: main.py
+================================================================================
+"""
+主程序模块: 实现轨迹生成的主要流程
+
+包含:
+- 命令行参数解析
+- 环境数据加载
+- 路径规划和轨迹生成
+- 结果分析和保存
+"""
+
+import argparse
+import numpy as np
+import os
+import rasterio
+from typing import List, Tuple
+import matplotlib.pyplot as plt
+
+from environment import Environment
+from path_planner import PathPlanner
+from trajectory_generator import TrajectoryGenerator
+from map_generator import MapGenerator
+from utils import calculate_distance, haversine_distance
+
+def parse_args():
+    """解析命令行参数"""
+    parser = argparse.ArgumentParser(description='轨迹生成器')
+    
+    # 必需参数
+    parser.add_argument(
+        '--start_row',
+        type=int,
+        required=True,
+        help='起点行号'
+    )
+    parser.add_argument(
+        '--start_col',
+        type=int,
+        required=True,
+        help='起点列号'
+    )
+    parser.add_argument(
+        '--end_row',
+        type=int,
+        required=True,
+        help='终点行号'
+    )
+    parser.add_argument(
+        '--end_col',
+        type=int,
+        required=True,
+        help='终点列号'
+    )
+    
+    # 可选参数
+    parser.add_argument(
+        '--target_speed',
+        type=float,
+        default=None,
+        help='目标速度(米/秒)'
+    )
+    parser.add_argument(
+        '--output_dir',
+        type=str,
+        default='data/output',
+        help='输出目录'
+    )
+    
+    return parser.parse_args()
+
+def analyze_trajectory(
+    trajectory: List[Tuple[int, int]],
+    transform: rasterio.Affine
+) -> dict:
+    """
+    分析轨迹特征
+
+    参数:
+        trajectory: 轨迹点列表
+        transform: 仿射变换矩阵
+
+    返回:
+        特征字典
+    """
+    if not trajectory:
+        return {
+            'length': 0.0,
+            'start': None,
+            'end': None,
+            'num_points': 0
+        }
+        
+    # 计算轨迹长度
+    length = 0.0
+    for i in range(len(trajectory) - 1):
+        length += calculate_distance(
+            trajectory[i],
+            trajectory[i + 1],
+            transform
+        )
+        
+    return {
+        'length': length / 1000,  # 转换为千米
+        'start': trajectory[0],
+        'end': trajectory[-1],
+        'num_points': len(trajectory)
+    }
+
+def analyze_path(
+    path: List[Tuple[int, int]],
+    transform: rasterio.Affine
+) -> dict:
+    """
+    分析路径特征
+
+    参数:
+        path: 路径点列表
+        transform: 仿射变换矩阵
+
+    返回:
+        特征字典
+    """
+    if not path:
+        return {
+            'length': 0.0,
+            'start': None,
+            'end': None,
+            'num_points': 0
+        }
+        
+    # 计算路径长度
+    length = 0.0
+    for i in range(len(path) - 1):
+        length += calculate_distance(
+            path[i],
+            path[i + 1],
+            transform
+        )
+        
+    return {
+        'length': length / 1000,  # 转换为千米
+        'start': path[0],
+        'end': path[-1],
+        'num_points': len(path)
+    }
+
+def main():
+    """主函数"""
+    # 解析命令行参数
+    args = parse_args()
+    
+    # 创建输出目录
+    os.makedirs(args.output_dir, exist_ok=True)
+    
+    # 加载环境数据
+    print("加载环境数据...")
+    env = Environment()
+    env.load_data()
+    
+    # 生成代价地图
+    print("生成代价地图...")
+    map_gen = MapGenerator()
+    cost_map = map_gen.generate_cost_map(
+        env.dem,
+        env.slope,
+        env.landcover
+    )
+    
+    # 可视化地图
+    print("可视化地图...")
+    map_gen.transform = env.transform
+    map_gen.crs = env.crs
+    map_gen.visualize_maps(args.output_dir)
+    
+    # 创建路径规划器
+    print("规划路径...")
+    planner = PathPlanner(
+        cost_map=cost_map,
+        transform=env.transform
+    )
+    
+    # 规划路径
+    start = (args.start_row, args.start_col)
+    goal = (args.end_row, args.end_col)
+    path = planner.find_path(start, goal)
+    
+    # 分析路径
+    path_info = analyze_path(path, env.transform)
+    print(f"路径长度: {path_info['length']:.2f} km")
+    print(f"路径点数: {path_info['num_points']}")
+    
+    # 平滑路径
+    smoothed_path = planner.smooth_path(path)
+    
+    # 创建轨迹生成器
+    print("生成轨迹...")
+    generator = TrajectoryGenerator(
+        speed_map=map_gen.speed_map,
+        transform=env.transform,
+        target_speed=args.target_speed
+    )
+    
+    # 生成轨迹
+    trajectory, times = generator.generate_trajectory(smoothed_path)
+    
+    # 平滑轨迹
+    smoothed_trajectory = generator.smooth_trajectory(trajectory)
+    
+    # 分析轨迹
+    traj_info = analyze_trajectory(smoothed_trajectory, env.transform)
+    print(f"轨迹长度: {traj_info['length']:.2f} km")
+    print(f"轨迹点数: {traj_info['num_points']}")
+    print(f"总时间: {times[-1]:.2f} 秒")
+    print(f"平均速度: {(traj_info['length'] * 1000 / times[-1]):.2f} m/s")
+    
+    # 保存结果
+    print("保存结果...")
+    
+    # 绘制路径和轨迹
+    plt.figure(figsize=(10, 10))
+    plt.imshow(cost_map, cmap='gray')
+    
+    # 绘制原始路径
+    path_points = np.array(path)
+    plt.plot(
+        path_points[:, 1],
+        path_points[:, 0],
+        'r-',
+        label='原始路径',
+        linewidth=1
+    )
+    
+    # 绘制平滑路径
+    smoothed_path_points = np.array(smoothed_path)
+    plt.plot(
+        smoothed_path_points[:, 1],
+        smoothed_path_points[:, 0],
+        'g-',
+        label='平滑路径',
+        linewidth=1
+    )
+    
+    # 绘制轨迹
+    traj_points = np.array(smoothed_trajectory)
+    plt.plot(
+        traj_points[:, 1],
+        traj_points[:, 0],
+        'b.',
+        label='轨迹点',
+        markersize=1
+    )
+    
+    plt.colorbar(label='代价')
+    plt.legend()
+    plt.title('路径和轨迹')
+    plt.savefig(os.path.join(args.output_dir, 'trajectory.png'))
+    plt.close()
+    
+    print("完成!")
+
+if __name__ == '__main__':
+    main() 
+
+================================================================================
+文件: map_generator.py
+================================================================================
+"""
+地图生成器模块：负责生成速度图和成本图
+
+功能：
+- 生成基础速度图
+- 应用坡向约束
+- 生成成本图
+- 可视化结果
+"""
+
+import numpy as np
+import rasterio
+from typing import Tuple, Optional
+import os
+import matplotlib.pyplot as plt
+from matplotlib.font_manager import FontProperties
+from config import (
+    SLOPE_PATH,
+    ASPECT_PATH,
+    LANDCOVER_PATH,
+    SPEED_MAP_PATH,
+    COST_MAP_PATH,
+    LANDCOVER_CODES,
+    SLOPE_SPEED_REDUCTION_FACTOR,
+    ASPECT_UPHILL_REDUCTION_K,
+    ASPECT_CROSS_REDUCTION_K,
+    MAX_CROSS_SLOPE_DEGREES,
+    MAX_BRAKING_SPEED_DOWNHILL,
+    IMPASSABLE_LANDCOVER_CODES,
+    DEFAULT_SPEED_MPS
+)
+
+# 定义土地覆盖类型的基础速度（m/s）
+BASE_SPEED_RULES = {
+    LANDCOVER_CODES['CROPLAND']: 8.3,     # 30 km/h
+    LANDCOVER_CODES['FOREST']: 2.8,       # 10 km/h
+    LANDCOVER_CODES['GRASSLAND']: 5.6,    # 20 km/h
+    LANDCOVER_CODES['SHRUBLAND']: 4.2,    # 15 km/h
+    LANDCOVER_CODES['WETLAND']: 1.1,      # 4 km/h
+    LANDCOVER_CODES['WATER']: 0.0,        # 不可通行
+    LANDCOVER_CODES['ARTIFICIAL']: 16.7,  # 60 km/h
+    LANDCOVER_CODES['BARELAND']: 1.4,     # 5 km/h
+    LANDCOVER_CODES['NODATA']: 0.0        # 不可通行
+}
+
+class MapGenerator:
+    """地图生成器类：生成速度图和成本图"""
+    
+    def __init__(self):
+        """初始化地图生成器"""
+        self.landcover = None
+        self.elevation = None
+        self.slope = None
+        self.speed_map = None
+        self.transform = None
+        self.crs = None
+        self.base_speed_map = None
+        self.cost_map = None
+        self.width = None
+        self.height = None
+        self.base_speeds = {
+            10: 1.4,  # 水域
+            20: 1.4,  # 城市
+            30: 1.4,  # 裸地
+            40: 1.4,  # 灌木
+            50: 1.4,  # 湿地
+            60: 1.4,  # 草地
+            70: 1.0,  # 农田
+            80: 0.7,  # 森林
+            90: 0.0   # 冰雪
+        }
+        
+    def load_data(self):
+        """加载环境数据"""
+        # 加载土地覆盖数据
+        landcover_path = "data/input/landcover_30m_100km.tif"
+        with rasterio.open(landcover_path) as src:
+            self.landcover = src.read(1)
+            self.transform = src.transform
+            self.crs = src.crs
+            self.width = src.width
+            self.height = src.height
+            
+        # 加载高程数据
+        elevation_path = "data/input/dem_30m_100km.tif"
+        with rasterio.open(elevation_path) as src:
+            self.elevation = src.read(1)
+            
+        # 计算坡度
+        self.slope = self._calculate_slope()
+        
+        # 生成速度地图
+        self.speed_map = self._generate_speed_map()
+        
+        # 生成成本图
+        self.cost_map = self._generate_cost_map()
+        
+    def _calculate_slope(self):
+        """计算坡度（度）"""
+        if self.elevation is None:
+            raise ValueError("需要先加载高程数据")
+        
+        # 计算x和y方向的梯度
+        dy, dx = np.gradient(self.elevation)
+        
+        # 计算坡度（度）
+        slope = np.degrees(np.arctan(np.sqrt(dx*dx + dy*dy)))
+        return slope
+
+    def _generate_speed_map(self):
+        """生成速度地图"""
+        if self.landcover is None or self.slope is None:
+            raise ValueError("需要先加载土地覆盖数据和计算坡度")
+        
+        # 初始化速度地图
+        speed_map = np.zeros_like(self.landcover, dtype=float)
+        
+        # 根据土地覆盖类型设置基础速度
+        for lc_type, base_speed in self.base_speeds.items():
+            mask = (self.landcover == lc_type)
+            speed_map[mask] = base_speed
+        
+        # 根据坡度调整速度
+        # 坡度大于45度时速度为0
+        speed_map[self.slope > 45] = 0
+        
+        # 坡度在0-45度之间时，速度随坡度增加而线性减小
+        slope_factor = 1 - self.slope / 45
+        slope_factor = np.clip(slope_factor, 0, 1)
+        speed_map *= slope_factor
+        
+        return speed_map
+        
+    def generate_base_speed_map(self) -> np.ndarray:
+        """
+        生成基础速度图
+
+        返回:
+            基础速度图数组
+        """
+        if self.landcover is None:
+            raise ValueError("请先加载环境数据")
+            
+        # 初始化速度图
+        self.base_speed_map = np.full_like(self.landcover, DEFAULT_SPEED_MPS, dtype=np.float32)
+        
+        # 应用基础速度规则
+        for landcover_code, speed in BASE_SPEED_RULES.items():
+            self.base_speed_map[self.landcover == landcover_code] = speed
+            
+        # 处理不可通行区域
+        for code in IMPASSABLE_LANDCOVER_CODES:
+            self.base_speed_map[self.landcover == code] = 0.0
+            
+        return self.base_speed_map
+        
+    def calculate_slope_factors(
+        self,
+        heading_degrees: float
+    ) -> Tuple[np.ndarray, np.ndarray]:
+        """
+        计算坡度影响因子
+
+        参数:
+            heading_degrees: 行进方向(度)
+
+        返回:
+            along_slope: 沿途坡度
+            cross_slope: 横向坡度
+        """
+        if self.slope is None or self.speed_map is None:
+            raise ValueError("请先加载环境数据")
+            
+        # 将行进方向转换为弧度
+        heading_rad = np.radians(heading_degrees)
+        aspect_rad = np.radians(self.speed_map)
+        slope_rad = np.radians(self.slope)
+        
+        # 计算沿途坡度和横向坡度
+        direction_diff = aspect_rad - heading_rad
+        along_slope = np.abs(self.slope * np.cos(direction_diff))
+        cross_slope = np.abs(self.slope * np.sin(direction_diff))
+        
+        return along_slope, cross_slope
+        
+    def apply_slope_aspect_constraints(
+        self,
+        heading_degrees: float
+    ) -> np.ndarray:
+        """
+        应用坡向约束
+
+        参数:
+            heading_degrees: 行进方向(度)
+
+        返回:
+            调整后的速度图
+        """
+        if self.base_speed_map is None:
+            raise ValueError("请先生成基础速度图")
+            
+        # 计算坡度影响
+        along_slope, cross_slope = self.calculate_slope_factors(heading_degrees)
+        
+        # 计算上坡减速因子
+        uphill_reduction = np.maximum(0.1, 1 - ASPECT_UPHILL_REDUCTION_K * along_slope)
+        
+        # 计算横坡减速因子
+        cross_reduction = np.maximum(0.05, 1 - ASPECT_CROSS_REDUCTION_K * cross_slope**2)
+        
+        # 应用坡度约束
+        speed_map = self.base_speed_map * uphill_reduction * cross_reduction
+        
+        # 应用下坡制动限制
+        speed_map = np.minimum(speed_map, MAX_BRAKING_SPEED_DOWNHILL)
+        
+        # 应用横坡阈值限制
+        speed_map[cross_slope > MAX_CROSS_SLOPE_DEGREES] = 0.0
+        
+        return speed_map
+        
+    def generate_cost_map(
+        self,
+        heading_degrees: float = 0.0,
+        max_cost: float = 1e6
+    ) -> np.ndarray:
+        """
+        生成成本图
+
+        参数:
+            heading_degrees: 行进方向(度)
+            max_cost: 不可通行区域的成本值
+
+        返回:
+            成本图数组
+        """
+        # 生成基础速度图
+        self.generate_base_speed_map()
+        
+        # 应用坡向约束
+        speed_map = self.apply_slope_aspect_constraints(heading_degrees)
+        
+        # 设置一个极小的速度阈值，避免除零
+        min_speed = 1e-6
+        
+        # 计算成本图
+        self.cost_map = np.where(
+            speed_map > min_speed,
+            1.0 / np.maximum(speed_map, min_speed),  # 确保分母不为0
+            max_cost  # 不可通行区域设置较大成本
+        )
+        
+        # 检查并处理异常值
+        if np.isnan(self.cost_map).any():
+            print("警告：成本图中存在NaN值，将其替换为最大成本")
+            self.cost_map[np.isnan(self.cost_map)] = max_cost
+            
+        if np.isinf(self.cost_map).any():
+            print("警告：成本图中存在Inf值，将其替换为最大成本")
+            self.cost_map[np.isinf(self.cost_map)] = max_cost
+            
+        if (self.cost_map < 0).any():
+            print("警告：成本图中存在负值，将其替换为最大成本")
+            self.cost_map[self.cost_map < 0] = max_cost
+            
+        # 确保成本图中的值都是有限的
+        self.cost_map = np.clip(self.cost_map, 0, max_cost)
+        
+        return self.cost_map
+        
+    def save_maps(self) -> None:
+        """保存速度图和成本图"""
+        if self.base_speed_map is None or self.cost_map is None:
+            raise ValueError("请先生成速度图和成本图")
+            
+        # 创建输出目录
+        os.makedirs(os.path.dirname(SPEED_MAP_PATH), exist_ok=True)
+        
+        # 保存基础速度图
+        with rasterio.open(
+            SPEED_MAP_PATH,
+            'w',
+            driver='GTiff',
+            height=self.base_speed_map.shape[0],
+            width=self.base_speed_map.shape[1],
+            count=1,
+            dtype=self.base_speed_map.dtype,
+            crs=self.crs,
+            transform=self.transform
+        ) as dst:
+            dst.write(self.base_speed_map, 1)
+            
+        # 保存成本图
+        with rasterio.open(
+            COST_MAP_PATH,
+            'w',
+            driver='GTiff',
+            height=self.cost_map.shape[0],
+            width=self.cost_map.shape[1],
+            count=1,
+            dtype=self.cost_map.dtype,
+            crs=self.crs,
+            transform=self.transform
+        ) as dst:
+            dst.write(self.cost_map, 1)
+            
+    def visualize_maps(self, output_dir: str) -> None:
+        """
+        可视化地图
+
+        参数:
+            output_dir: 输出目录
+        """
+        if self.base_speed_map is None or self.cost_map is None:
+            raise ValueError("请先生成速度图和成本图")
+            
+        # 创建输出目录
+        os.makedirs(output_dir, exist_ok=True)
+        
+        # 设置字体
+        times_font = FontProperties(fname='/usr/share/fonts/truetype/msttcorefonts/Times_New_Roman.ttf')
+        simsun_font = FontProperties(fname='/usr/share/fonts/truetype/custom/simsun.ttc')
+        
+        # 绘制基础速度图
+        plt.figure(figsize=(12, 8))
+        plt.imshow(self.base_speed_map, cmap='viridis')
+        plt.colorbar(label='速度 (m/s)')
+        plt.title('基础速度图', fontproperties=simsun_font, fontsize=16)
+        plt.xticks(fontproperties=times_font, fontsize=16)
+        plt.yticks(fontproperties=times_font, fontsize=16)
+        plt.savefig(os.path.join(output_dir, 'base_speed_map.png'), dpi=300, bbox_inches='tight')
+        plt.close()
+        
+        # 绘制成本图
+        plt.figure(figsize=(12, 8))
+        plt.imshow(self.cost_map, cmap='magma')
+        plt.colorbar(label='成本 (s/m)')
+        plt.title('通行成本图', fontproperties=simsun_font, fontsize=16)
+        plt.xticks(fontproperties=times_font, fontsize=16)
+        plt.yticks(fontproperties=times_font, fontsize=16)
+        plt.savefig(os.path.join(output_dir, 'cost_map.png'), dpi=300, bbox_inches='tight')
+        plt.close()
+        
+    def _generate_cost_map(self):
+        """生成成本图"""
+        if self.speed_map is None:
+            raise ValueError("需要先生成速度地图")
+        
+        # 成本是速度的倒数
+        # 为了避免除以0，我们先将速度为0的地方设为一个很小的数
+        speed_map = self.speed_map.copy()
+        speed_map[speed_map == 0] = 1e-6
+        
+        cost_map = 1.0 / speed_map
+        return cost_map
+
+def main():
+    """主函数：测试地图生成器"""
+    # 创建地图生成器
+    generator = MapGenerator()
+    
+    # 加载数据
+    print("加载环境数据...")
+    generator.load_data()
+    
+    # 生成地图
+    print("生成速度图和成本图...")
+    generator.generate_cost_map(heading_degrees=45.0)  # 测试45度方向的地图
+    
+    # 保存地图
+    print("保存地图文件...")
+    generator.save_maps()
+    
+    # 可视化结果
+    print("生成可视化图表...")
+    generator.visualize_maps(os.path.join("data", "output", "maps"))
+    
+    print("地图生成完成！")
+    
+if __name__ == "__main__":
+    main() 
+
+================================================================================
+文件: path_planner.py
+================================================================================
+"""
+路径规划器模块：使用A*算法进行路径规划
+
+输入：
+- 成本图
+- 起点和终点坐标
+
+输出：
+- 路径点列表
+- 路径总成本
+
+处理流程：
+1. 加载成本图
+2. 使用A*算法找到最优路径
+3. 对路径进行平滑处理
+"""
+
+import os
+import numpy as np
+from typing import List, Tuple, Optional
+import heapq
+from scipy.ndimage import gaussian_filter1d
+import rasterio
+from config import OUTPUT_DIR
+
+class Node:
+    """A*算法的节点类"""
+    def __init__(self, pos: Tuple[int, int], g_cost: float, h_cost: float, parent=None):
+        self.pos = pos
+        self.g_cost = g_cost  # 从起点到当前点的成本
+        self.h_cost = h_cost  # 从当前点到终点的估计成本
+        self.f_cost = g_cost + h_cost  # 总成本
+        self.parent = parent
+        
+    def __lt__(self, other):
+        return self.f_cost < other.f_cost
+        
+class PathPlanner:
+    """路径规划器类"""
+    
+    def __init__(self):
+        """初始化路径规划器"""
+        self.cost_map = None
+        self.shape = None
+        
+    def load_cost_map(self) -> None:
+        """加载成本图"""
+        cost_path = os.path.join(OUTPUT_DIR, "intermediate", "cost_map.tif")
+        with rasterio.open(cost_path) as src:
+            self.cost_map = src.read(1)
+            self.shape = self.cost_map.shape
+            
+    def heuristic(self, pos: Tuple[int, int], goal: Tuple[int, int]) -> float:
+        """
+        计算启发式成本（曼哈顿距离）
+        
+        参数:
+            pos: 当前位置
+            goal: 目标位置
+            
+        返回:
+            float: 启发式成本
+        """
+        return abs(pos[0] - goal[0]) + abs(pos[1] - goal[1])
+        
+    def get_neighbors(self, pos: Tuple[int, int]) -> List[Tuple[int, int]]:
+        """
+        获取相邻节点
+        
+        参数:
+            pos: 当前位置
+            
+        返回:
+            List[Tuple[int, int]]: 相邻节点列表
+        """
+        row, col = pos
+        neighbors = []
+        
+        # 8个方向的相邻点
+        for dr, dc in [(0, 1), (1, 0), (0, -1), (-1, 0),
+                      (1, 1), (1, -1), (-1, 1), (-1, -1)]:
+            new_row, new_col = row + dr, col + dc
+            
+            # 检查边界
+            if not (0 <= new_row < self.shape[0] and 0 <= new_col < self.shape[1]):
+                continue
+                
+            # 检查是否可通行
+            if not np.isfinite(self.cost_map[new_row, new_col]):
+                continue
+                
+            neighbors.append((new_row, new_col))
+            
+        return neighbors
+        
+    def get_path_cost(self, pos1: Tuple[int, int], pos2: Tuple[int, int]) -> float:
+        """
+        计算两个相邻点之间的路径成本
+        
+        参数:
+            pos1: 第一个点
+            pos2: 第二个点
+            
+        返回:
+            float: 路径成本
+        """
+        # 对角线移动的成本是直线移动的√2倍
+        is_diagonal = pos1[0] != pos2[0] and pos1[1] != pos2[1]
+        distance = np.sqrt(2) if is_diagonal else 1.0
+        
+        # 使用两点的平均成本
+        avg_cost = (self.cost_map[pos1] + self.cost_map[pos2]) / 2
+        
+        return distance * avg_cost
+        
+    def find_path(
+        self,
+        start: Tuple[int, int],
+        goal: Tuple[int, int]
+    ) -> Tuple[List[Tuple[int, int]], float]:
+        """
+        使用A*算法找到最优路径
+        
+        参数:
+            start: 起点坐标
+            goal: 终点坐标
+            
+        返回:
+            Tuple[List[Tuple[int, int]], float]: 路径点列表和总成本
+        """
+        if self.cost_map is None:
+            self.load_cost_map()
+            
+        # 检查起点和终点是否可通行
+        if not np.isfinite(self.cost_map[start]) or not np.isfinite(self.cost_map[goal]):
+            raise ValueError("起点或终点不可通行")
+            
+        # 初始化开放列表和关闭列表
+        open_list = []
+        closed_set = set()
+        
+        # 创建起点节点
+        start_node = Node(start, 0, self.heuristic(start, goal))
+        heapq.heappush(open_list, start_node)
+        
+        # 记录每个位置的最佳节点
+        best_nodes = {start: start_node}
+        
+        print(f"\n开始寻路: 从{start}到{goal}")
+        print(f"起点成本: {self.cost_map[start]:.2f}")
+        print(f"终点成本: {self.cost_map[goal]:.2f}")
+        
+        # A*主循环
+        while open_list:
+            # 获取f成本最小的节点
+            current = heapq.heappop(open_list)
+            
+            # 如果到达目标，构建路径并返回
+            if current.pos == goal:
+                path = []
+                total_cost = current.g_cost
+                while current:
+                    path.append(current.pos)
+                    current = current.parent
+                path.reverse()
+                
+                # 平滑路径
+                smoothed_path = self.smooth_path(path)
+                
+                print(f"找到路径！")
+                print(f"路径长度: {len(smoothed_path)}个点")
+                print(f"总成本: {total_cost:.2f}")
+                
+                return smoothed_path, total_cost
+                
+            # 将当前节点加入关闭列表
+            closed_set.add(current.pos)
+            
+            # 检查相邻节点
+            for neighbor_pos in self.get_neighbors(current.pos):
+                # 如果节点已经在关闭列表中，跳过
+                if neighbor_pos in closed_set:
+                    continue
+                    
+                # 计算到相邻节点的成本
+                g_cost = current.g_cost + self.get_path_cost(current.pos, neighbor_pos)
+                
+                # 如果这是一个新节点，或者找到了更好的路径
+                if (neighbor_pos not in best_nodes or
+                    g_cost < best_nodes[neighbor_pos].g_cost):
+                    # 创建新节点
+                    h_cost = self.heuristic(neighbor_pos, goal)
+                    neighbor_node = Node(neighbor_pos, g_cost, h_cost, current)
+                    
+                    # 更新最佳节点记录
+                    best_nodes[neighbor_pos] = neighbor_node
+                    
+                    # 添加到开放列表
+                    heapq.heappush(open_list, neighbor_node)
+                    
+        print("未找到路径！")
+        return [], float('inf')
+        
+    def smooth_path(
+        self,
+        path: List[Tuple[int, int]],
+        sigma: float = 2.0
+    ) -> List[Tuple[int, int]]:
+        """
+        使用高斯滤波平滑路径
+        
+        参数:
+            path: 原始路径
+            sigma: 高斯核标准差
+            
+        返回:
+            List[Tuple[int, int]]: 平滑后的路径
+        """
+        if len(path) < 3:
+            return path
+            
+        # 分离坐标
+        rows = np.array([p[0] for p in path])
+        cols = np.array([p[1] for p in path])
+        
+        # 应用高斯滤波
+        smooth_rows = gaussian_filter1d(rows, sigma)
+        smooth_cols = gaussian_filter1d(cols, sigma)
+        
+        # 四舍五入到整数并组合
+        return list(zip(
+            np.round(smooth_rows).astype(int),
+            np.round(smooth_cols).astype(int)
+        ))
+        
+def main():
+    """主函数：测试路径规划器"""
+    # 创建路径规划器
+    planner = PathPlanner()
+    
+    # 加载成本图
+    planner.load_cost_map()
+    
+    # 测试路径规划
+    start = (100, 100)
+    goal = (200, 200)
+    path, cost = planner.find_path(start, goal)
+    
+    if path:
+        print(f"\n路径规划成功:")
+        print(f"路径长度: {len(path)}个点")
+        print(f"总成本: {cost:.2f}")
+    else:
+        print("\n未找到可行路径")
+        
+if __name__ == "__main__":
+    main() 
+
+================================================================================
+文件: plot_style.py
+================================================================================
+"""
+matplotlib作图样式配置文件
+将此文件放在项目根目录下，在绘图时导入即可使用统一的样式
+"""
+import matplotlib.pyplot as plt
+import matplotlib.font_manager as fm
+import matplotlib as mpl
+from pathlib import Path
+
+def setup_style():
+    """设置matplotlib的默认样式"""
+    # 设置字体路径
+    SIMSUN_PATH = '/usr/share/fonts/truetype/custom/simsun.ttc'
+    TIMES_PATH = '/usr/share/fonts/truetype/custom/times.ttf'
+    
+    # 添加字体
+    fm.fontManager.addfont(SIMSUN_PATH)
+    fm.fontManager.addfont(TIMES_PATH)
+    
+    # 设置默认字体
+    plt.rcParams['font.family'] = ['Times New Roman', 'SimSun']
+    plt.rcParams['font.size'] = 16
+    plt.rcParams['axes.unicode_minus'] = False
+    
+    # 设置默认图形大小和分辨率
+    plt.rcParams['figure.figsize'] = [8, 6]
+    plt.rcParams['figure.dpi'] = 100
+    plt.rcParams['savefig.dpi'] = 300
+    
+    # 设置网格线样式
+    plt.rcParams['grid.linestyle'] = '--'
+    plt.rcParams['grid.alpha'] = 0.3
+    plt.rcParams['grid.color'] = 'gray'
+    
+    # 设置刻度朝内
+    plt.rcParams['xtick.direction'] = 'in'
+    plt.rcParams['ytick.direction'] = 'in'
+    
+    # 设置坐标轴线宽
+    plt.rcParams['axes.linewidth'] = 1.5
+    
+    # 设置刻度标签大小
+    plt.rcParams['xtick.labelsize'] = 16
+    plt.rcParams['ytick.labelsize'] = 16
+    
+    # 设置图例字体大小
+    plt.rcParams['legend.fontsize'] = 16
+    
+    # 设置标题字体大小
+    plt.rcParams['axes.titlesize'] = 16
+    
+    # 设置坐标轴标签字体大小
+    plt.rcParams['axes.labelsize'] = 16
+
+# 在导入模块时自动设置样式
+setup_style() 
+
+================================================================================
+文件: point_selector.py
+================================================================================
+"""
+点选择器模块：负责选择合适的起终点对
+
+输入：
+- 土地覆盖数据
+- 基础速度图
+- 成本图
+
+输出：
+- 起终点对列表
+
+处理流程：
+1. 选择终点（靠近城市区域）
+2. 为每个终点选择合适的起点
+3. 验证并保存起终点对
+"""
+
+import os
+import numpy as np
+import pandas as pd
+from typing import List, Tuple, Optional
+import rasterio
+from config import (
+    INPUT_DIR,
+    OUTPUT_DIR,
+    LANDCOVER_PATH,
+    URBAN_LANDCOVER_CODES,
+    IMPASSABLE_LANDCOVER_CODES,
+    NUM_END_POINTS,
+    MIN_START_END_DISTANCE_METERS
+)
+
+class PointSelector:
+    """点选择器类"""
+    
+    def __init__(self):
+        """初始化点选择器"""
+        self.landcover = None
+        self.base_speed = None
+        self.cost = None
+        self.transform = None
+        self.shape = None
+        self.pixel_size = 30.0  # 固定栅格大小为30米
+        
+    def load_data(self) -> None:
+        """加载数据"""
+        print("加载环境数据...")
+        
+        # 加载土地覆盖数据
+        with rasterio.open(LANDCOVER_PATH) as src:
+            self.landcover = src.read(1)
+            self.transform = src.transform
+            self.shape = self.landcover.shape
+            print(f"数据形状: {self.shape}")
+            print(f"像素大小: {self.pixel_size:.2f}米")
+            
+        # 加载基础速度图
+        speed_path = os.path.join(OUTPUT_DIR, "intermediate", "base_speed_map.tif")
+        with rasterio.open(speed_path) as src:
+            self.base_speed = src.read(1)
+            
+        # 加载成本图
+        cost_path = os.path.join(OUTPUT_DIR, "intermediate", "cost_map.tif")
+        with rasterio.open(cost_path) as src:
+            self.cost = src.read(1)
+            
+    def is_valid_point(self, row: int, col: int) -> bool:
+        """
+        检查点是否有效
+        
+        参数:
+            row: 行索引
+            col: 列索引
+            
+        返回:
+            bool: 是否为有效点
+        """
+        # 检查边界
+        if not (0 <= row < self.shape[0] and 0 <= col < self.shape[1]):
+            return False
+            
+        # 检查是否可通行
+        if self.landcover[row, col] in IMPASSABLE_LANDCOVER_CODES:
+            return False
+            
+        # 检查是否有基础速度
+        if self.base_speed[row, col] <= 0:
+            return False
+            
+        # 检查是否有有限成本
+        if not np.isfinite(self.cost[row, col]):
+            return False
+            
+        return True
+        
+    def calculate_distance(self, point1: Tuple[int, int], point2: Tuple[int, int]) -> float:
+        """
+        计算两点间的欧氏距离（米）
+        
+        参数:
+            point1: 第一个点的(行,列)坐标
+            point2: 第二个点的(行,列)坐标
+            
+        返回:
+            float: 距离（米）
+        """
+        row1, col1 = point1
+        row2, col2 = point2
+        pixel_dist = np.sqrt((row2 - row1)**2 + (col2 - col1)**2)
+        return pixel_dist * self.pixel_size
+        
+    def select_end_points(self) -> List[Tuple[int, int]]:
+        """
+        选择终点
+        
+        返回:
+            List[Tuple[int, int]]: 终点列表，每个元素为(行,列)坐标
+        """
+        print("\n选择终点...")
+        end_points = []
+        
+        # 找到所有城市区域的点
+        urban_points = []
+        for code in URBAN_LANDCOVER_CODES:
+            points = np.argwhere(self.landcover == code)
+            for point in points:
+                if self.is_valid_point(point[0], point[1]):
+                    urban_points.append(tuple(point))
+                    
+        if not urban_points:
+            raise ValueError("未找到有效的城市区域点")
+            
+        # 随机选择指定数量的终点
+        if len(urban_points) > NUM_END_POINTS:
+            selected_indices = np.random.choice(len(urban_points), NUM_END_POINTS, replace=False)
+            end_points = [urban_points[i] for i in selected_indices]
+        else:
+            end_points = urban_points
+            
+        print(f"已选择 {len(end_points)} 个终点")
+        for i, point in enumerate(end_points):
+            print(f"终点 {i+1}: {point}, 土地类型: {self.landcover[point]}, 基础速度: {self.base_speed[point]:.1f} m/s")
+        return end_points
+        
+    def select_start_points(self, end_point: Tuple[int, int], num_attempts: int = 1000) -> List[Tuple[int, int]]:
+        """
+        为终点选择起点
+        
+        参数:
+            end_point: 终点坐标(行,列)
+            num_attempts: 尝试次数
+            
+        返回:
+            List[Tuple[int, int]]: 起点列表
+        """
+        start_points = []
+        end_row, end_col = end_point
+        
+        # 计算搜索范围（像素）
+        min_pixels = int(MIN_START_END_DISTANCE_METERS / self.pixel_size)
+        max_pixels = int(min_pixels * 1.5)  # 设置最大距离为最小距离的1.5倍
+        
+        print(f"\n为终点{end_point}选择起点")
+        print(f"搜索范围: {min_pixels}-{max_pixels}像素 ({MIN_START_END_DISTANCE_METERS/1000:.1f}-{MIN_START_END_DISTANCE_METERS*1.5/1000:.1f}公里)")
+        
+        # 在不同距离和角度上尝试选择起点
+        for distance in [min_pixels, (min_pixels + max_pixels)//2, max_pixels]:
+            for angle in np.linspace(0, 360, 12):  # 每30度取一个点
+                # 计算候选点坐标
+                rad = np.radians(angle)
+                row = int(end_row + distance * np.sin(rad))
+                col = int(end_col + distance * np.cos(rad))
+                
+                # 检查点的有效性
+                if self.is_valid_point(row, col):
+                    actual_dist = self.calculate_distance((row, col), end_point)
+                    if actual_dist >= MIN_START_END_DISTANCE_METERS:
+                        start_points.append((row, col))
+                        print(f"找到有效起点: ({row}, {col}), 距离: {actual_dist/1000:.1f}公里")
+                        
+        print(f"共找到{len(start_points)}个有效起点")
+        return start_points
+        
+    def select_start_end_pairs(self) -> List[Tuple[Tuple[int, int], Tuple[int, int]]]:
+        """
+        选择起终点对
+        
+        返回:
+            List[Tuple[Tuple[int, int], Tuple[int, int]]]: 起终点对列表
+        """
+        # 选择终点
+        end_points = self.select_end_points()
+        
+        # 为每个终点选择起点
+        pairs = []
+        for end_point in end_points:
+            start_points = self.select_start_points(end_point)
+            if start_points:
+                # 为每个终点随机选择一个起点
+                start_point = start_points[np.random.randint(len(start_points))]
+                pairs.append((start_point, end_point))
+                
+        # 保存结果
+        self.save_pairs(pairs)
+        
+        return pairs
+        
+    def save_pairs(self, pairs: List[Tuple[Tuple[int, int], Tuple[int, int]]]) -> None:
+        """
+        保存起终点对
+        
+        参数:
+            pairs: 起终点对列表
+        """
+        # 创建DataFrame
+        data = []
+        for start, end in pairs:
+            distance = self.calculate_distance(start, end)
+            data.append({
+                'start_row': start[0],
+                'start_col': start[1],
+                'end_row': end[0],
+                'end_col': end[1],
+                'distance_meters': distance,
+                'start_landcover': self.landcover[start],
+                'end_landcover': self.landcover[end],
+                'start_speed': self.base_speed[start],
+                'end_speed': self.base_speed[end]
+            })
+            
+        df = pd.DataFrame(data)
+        
+        # 保存到CSV
+        output_path = os.path.join(OUTPUT_DIR, "start_end_pairs.csv")
+        df.to_csv(output_path, index=False)
+        print(f"\n起终点对数据已保存至: {output_path}")
+        
+def main():
+    """主函数：运行点选择流程"""
+    # 创建点选择器
+    selector = PointSelector()
+    
+    # 加载数据
+    selector.load_data()
+    
+    # 选择起终点对
+    pairs = selector.select_start_end_pairs()
+    
+    print("\n点选择完成！")
+    
+if __name__ == "__main__":
+    main() 
+
+================================================================================
+文件: readme.md
+================================================================================
+好的，我们来整合讨论的内容，更新一个“简单方法进行轨迹生成的项目开发指南 V1.1”。这个版本将包含基于预设规则的环境约束（考虑坡度与坡向）、批量生成、特定起终点选择以及轨迹评估方法。
+
+项目：基于预设规则与精细环境约束的合成轨迹生成器 (简化版)
+
+版本: 1.1
+日期: 2025-03-27
+目标读者: 开发工程师 (需要具备 GIS 处理与 Python 编程基础)
+
+1. 项目概述与目标
+
+目标: 开发一个工具，用于在给定的地理环境（DEM、坡度大小、坡度方向、土地覆盖）中，根据预设的移动规则，批量生成从指定起点到终点的合成轨迹。
+
+核心要求:
+
+规则驱动: 移动行为（速度、路径选择）由开发者预先设定的规则决定，而非从数据学习。
+
+精细环境感知: 生成的轨迹受坡度大小、土地覆盖类型影响，并且必须考虑坡度方向（坡向）与车辆行驶方向的相互作用（如上下坡、横坡行驶），动态影响速度和路径成本。
+
+批量生成: 能够自动生成指定数量（N条）的轨迹。
+
+特定起终点: 用户指定终点区域特征（如靠近城市），程序自动选择满足距离约束（如>80km）的起点。
+
+可控属性: 轨迹总长度和平均速度应大致可控。
+
+可评估性: 提供基本方法用于检查生成的轨迹。
+
+最终交付物:
+
+一个或多个 Python 脚本/模块，能执行地形分析、地图生成、起终点选择、批量轨迹模拟、基础评估的全流程。
+
+批量的合成轨迹数据文件（如 CSV）。
+
+基础评估输出（图表和日志）。
+
+2. 输入数据
+
+GIS 环境数据 (需放置在 data/input/gis/):
+
+dem_30m_100km.tif: 数字高程模型 (WGS 84, ~30m res)。
+
+landcover_30m_100km.tif: 土地覆盖数据 (分类编码, 与 DEM 对齐)。
+
+(新增/计算生成) slope_magnitude_30m_100km.tif: 坡度大小 (单位：度, 从 DEM 计算)。
+
+(新增/计算生成) slope_aspect_30m_100km.tif: 坡度方向/坡向 (单位：度, 北为0, 顺时针, 从 DEM 计算)。
+
+配置文件 (config.py):
+
+数据文件路径。
+
+(新增) NUM_TRAJECTORIES_TO_GENERATE: 要生成的轨迹总数 (e.g., 500)。
+
+(新增) NUM_END_POINTS: 要选择的固定终点数量 (e.g., 3)。
+
+(新增) MIN_START_END_DISTANCE_METERS: 起终点最小直线距离 (e.g., 80000)。
+
+(新增) URBAN_LANDCOVER_CODES: 代表城市/建成区的地物编码列表 (e.g., [1, 10])。
+
+(新增) IMPASSABLE_LANDCOVER_CODES: 代表绝对不可通行的地物编码列表 (e.g., [11], 水体)。
+
+预设规则:
+
+BASE_SPEED_RULES: 字典，定义不同土地覆盖类型的基础速度 (e.g., {1: 60, 2: 40, ...} km/h 或 m/s)。
+
+SLOPE_SPEED_REDUCTION_FACTOR: 坡度大小对速度的降低系数/曲线参数。
+
+(新增) ASPECT_UPHILL_REDUCTION_K: 上坡影响因子。
+
+(新增) ASPECT_CROSS_REDUCTION_K: 横坡影响因子。
+
+(新增) MAX_CROSS_SLOPE_DEGREES: 最大允许横坡角度。
+
+(新增) MAX_BRAKING_SPEED_DOWNHILL: 下坡最大安全速度（制动限制）。
+
+模拟参数 (dt, MAX_ACCELERATION, MAX_DECELERATION)。
+
+输出目录路径。
+
+3. 输出数据
+
+核心输出 (放置在 data/output/synthetic_batch_XXX/):
+
+trajectory_1.csv, ..., trajectory_N.csv: 合成轨迹文件 (timestamp, row, col, lon, lat, speed_mps, heading_degrees)。
+
+评估输出 (放置在 data/output/evaluation_report_XXX/):
+
+.png 图表文件：例如，生成轨迹的全局速度分布图。
+
+.log 文件：记录生成过程和基本统计。
+
+中间地图 (可选，放置在 data/output/intermediate/):
+
+base_speed_map.tif: 基于地物规则的基础速度图。
+
+cost_map.tif: 用于 A* 的成本图 (考虑坡度大小和地物，但不是方向性)。
+
+计算出的坡度/坡向图。
+
+4. 技术栈与依赖库
+
+Python 3.x, rasterio, numpy, pandas, geopandas (可选), scipy, pathfinding/skimage.graph, matplotlib, seaborn, logging。
+
+(新增/可选) richdem。
+
+5. 详细实现步骤
+
+阶段 0: 初始化与配置
+
+同复杂版 V1.2。
+
+阶段 1: 数据准备与地形分析 (扩展)
+
+加载 DEM, Landcover。
+
+计算并保存 slope_magnitude_30m_100km.tif 和 slope_aspect_30m_100km.tif。 (同复杂版 V1.2)
+
+阶段 2: 构建环境地图 (基于规则)
+
+初始化地图数组: 创建 base_speed_map, cost_map (以及加载 slope_magnitude_map, slope_aspect_map)。
+
+像素级计算:
+
+遍历栅格，获取 landcover_value, slope_magnitude_value。
+
+计算基础速度 (base_speed_map): 根据 config.BASE_SPEED_RULES[landcover_value] 填充。单位统一为 m/s。
+
+计算 A* 成本图 (cost_map - 简化):
+
+speed_adjusted_by_slope_mag = base_speed * f(slope_magnitude_value, config.SLOPE_SPEED_REDUCTION_FACTOR) # 应用坡度大小减速规则
+
+cost = pixel_size / speed_adjusted_by_slope_mag (如果速度 > 0)。
+
+标记不可通行区域 (Landcover in IMPASSABLE_CODES 或 坡度超限) 成本为 np.inf。
+
+注意: 这个成本图仅反映地物和坡度大小的影响，用于 A* 规划。
+
+(可选) 保存地图。
+
+阶段 3: 批量起终点选择 (新增)
+
+(作为独立模块 point_selector.py)
+
+实现 select_start_end_pairs 函数 (同复杂版 V1.2):
+
+加载 landcover_array。
+
+选择 NUM_END_POINTS 个城市附近的、可通行的终点。
+
+为每个终点选择满足距离约束 (MIN_START_END_DISTANCE_METERS) 且可通行的起点。
+
+返回 generation_pairs 列表。
+
+阶段 4: 批量合成轨迹生成 (核心模拟，包含坡向逻辑)
+
+(作为主控脚本 batch_generator.py 或修改 main.py)
+
+主循环: 遍历 generation_pairs 列表中的每一对 (start_point, end_point)。
+
+4.1 路径规划 (A) - 简化:*
+
+输入: start_point, end_point, 以及阶段 2 生成的 基于规则和坡度大小的 cost_map。
+
+运行 A* 找到最低成本路径 path = [(r0, c0), ..., (rn, cn)]。
+
+记录错误并跳过（如果无路径）。
+
+4.2 Agent-Based 运动模拟 (时间步进 - 关键修改):
+
+初始化: Agent 状态, 轨迹列表, 路径索引, dt。
+
+模拟循环:
+
+获取当前环境参数:
+
+根据 agent_pos 查询 base_speed_map 得到 base_speed (来自地物规则)。
+
+查询 slope_magnitude_map, slope_aspect_map 得到 current_slope_mag, current_aspect。
+
+查询 landcover_map 得到 current_landcover (可能需要用于特定规则)。
+
+计算方向性坡度指标: (同复杂版 V1.2)
+
+计算 slope_along_path 和 cross_slope。
+
+动态确定速度约束 (基于规则 - 核心修改):
+
+max_speed_base = base_speed # 基础最大速度由地物决定
+
+target_speed_base = base_speed * 0.8 # 假设目标速度是基础速度的某个比例
+
+应用坡度方向约束 (使用 config 中的因子):
+
+reduction_uphill = max(0.1, 1 - config.ASPECT_UPHILL_REDUCTION_K * max(0, slope_along_path))
+
+reduction_cross = max(0.05, 1 - config.ASPECT_CROSS_REDUCTION_K * cross_slope**2)
+
+# (可选) 坡度大小减速也在此处应用，或已融入 A* 成本图对应的速度调整逻辑中
+
+# speed_adjusted = base_speed * reduction_from_slope_magnitude
+
+max_speed_adjusted = max_speed_base * reduction_uphill * reduction_cross # 结合影响
+
+target_speed_adjusted = target_speed_base * reduction_uphill * reduction_cross
+
+max_speed_adjusted = np.clip(max_speed_adjusted, 0, config.MAX_BRAKING_SPEED_DOWNHILL) # 下坡制动限制
+
+if cross_slope > config.MAX_CROSS_SLOPE_DEGREES: max_speed_adjusted = min(max_speed_adjusted, VERY_LOW_SPEED) # 横坡阈值限制
+
+target_speed = np.clip(target_speed_adjusted, 0, max_speed_adjusted)
+
+(可选) 加入少量随机性: target_speed *= np.random.uniform(0.9, 1.1)
+
+应用加速度限制: (同复杂版 V1.2)
+
+最终速度约束: next_speed = np.clip(next_speed, 0, max_speed_adjusted)。
+
+确定目标朝向: 指向下一个路径点。
+
+应用转向限制 (预设值): 基于设定的最大转向率（可能与速度相关）。更新 next_heading。
+
+更新位置: (同复杂版 V1.2)
+
+更新 Agent 状态, 更新时间, 记录轨迹点。
+
+路径点切换 & 终止条件。
+
+4.3 保存轨迹: 保存为唯一的 CSV 文件。
+
+记录日志。
+
+阶段 5: 评估 (简化)
+
+(作为独立脚本 evaluator.py 或集成在批处理脚本中)
+
+加载数据: 实现 load_synthetic_data 加载所有生成的轨迹。
+
+执行基本分析:
+
+全局速度分布: 计算所有合成轨迹点的速度，绘制直方图或 KDE 图，输出到评估目录。
+
+轨迹长度/时长统计: 计算生成轨迹的总长度和总时长的分布，并记录均值/中位数/标准差。
+
+检查约束: 确认轨迹长度是否在目标范围（80-120km）。
+
+可视化检查 (重要):
+
+随机抽取几条合成轨迹叠加到地图上（DEM/Slope/Landcover）。
+
+检查路径是否合理，速度变化是否大致符合规则（如进出不同地物、上下坡、过横坡时是否有速度变化）。
+
+保存报告: 保存图表和统计日志。
+
+6. 代码结构与最佳实践
+
+模块化: terrain_analyzer.py, environment_mapper.py, point_selector.py, path_planner.py, simulator.py, evaluator.py, batch_generator.py (或 main.py), config.py, utils.py。
+
+配置分离: 所有规则、参数放入 config.py。
+
+测试: 重点测试地形分析、点选择、速度规则应用逻辑、模拟器单步更新。
+
+文档 & 日志: README 说明用法、规则配置；清晰 Docstrings；注释规则逻辑；使用 logging。
+
+版本控制 (Git)。
+
+7. 潜在挑战与注意事项 (更新)
+
+规则设定的合理性: 预设规则（速度、坡度影响因子、阈值）需要基于领域知识或反复试验来设定，直接影响轨迹真实性。
+
+坡向规则调优: ASPECT_UPHILL_REDUCTION_K, ASPECT_CROSS_REDUCTION_K, MAX_CROSS_SLOPE_DEGREES 等参数需要仔细调整以获得合理的行为。
+
+简化 A* 的局限: A* 未考虑方向性成本，可能导致规划出的路径在模拟阶段因方向性约束而变得通行困难或极慢。
+
+评估的局限: 简化版没有 OORD 数据做直接对比，评估主要依赖于内部一致性检查（是否符合规则）和可视化检查。
+
+这份 V1.1 简化版指南同样整合了坡向约束、批量生成和起点选择，但核心区别在于行为由预设规则驱动，而非数据学习。这降低了实现的复杂度，但对规则设定的合理性提出了更高要求。
+
+================================================================================
+文件: requirements.txt
+================================================================================
+# 基础数据处理和科学计算
+numpy>=1.21.0
+rasterio>=1.2.0
+scikit-image>=0.18.0
+matplotlib>=3.4.0
+networkx>=2.6.0
+
+# 工具包
+tqdm>=4.62.0  # 进度条 
+
+================================================================================
+文件: terrain_analyzer.py
+================================================================================
+"""
+地形分析器模块：负责计算和保存坡度、坡向数据
+
+功能：
+- 从DEM计算坡度大小
+- 从DEM计算坡向
+- 保存计算结果
+"""
+
+import numpy as np
+import rasterio
+from rasterio.transform import Affine
+from typing import Tuple, Optional
+import os
+import matplotlib.pyplot as plt
+from matplotlib.font_manager import FontProperties
+from config import DEM_PATH, SLOPE_PATH, ASPECT_PATH
+
+class TerrainAnalyzer:
+    """地形分析器类：处理DEM数据，计算坡度和坡向"""
+    
+    def __init__(self):
+        """初始化地形分析器"""
+        self.dem = None
+        self.slope = None
+        self.aspect = None
+        self.transform = None
+        self.crs = None
+        
+    def load_dem(self, dem_path: str = DEM_PATH) -> None:
+        """
+        加载DEM数据
+
+        参数:
+            dem_path: DEM文件路径
+        """
+        with rasterio.open(dem_path) as src:
+            self.dem = src.read(1)
+            self.transform = src.transform
+            self.crs = src.crs
+            
+    def calculate_slope_aspect(self) -> Tuple[np.ndarray, np.ndarray]:
+        """
+        计算坡度和坡向
+
+        返回:
+            slope: 坡度数组(度)
+            aspect: 坡向数组(度，北为0，顺时针)
+        """
+        if self.dem is None:
+            raise ValueError("请先加载DEM数据")
+            
+        # 使用固定的栅格大小(30米)
+        pixel_size = 30.0
+        
+        # 计算x和y方向的高程梯度(米/米)
+        dy, dx = np.gradient(self.dem, pixel_size)
+        
+        # 计算坡度(度)
+        # slope = arctan(sqrt(dx^2 + dy^2))
+        slope = np.degrees(np.arctan(np.sqrt(dx**2 + dy**2)))
+        
+        # 计算坡向(度)
+        # aspect = arctan2(-dx, dy)  # 使用-dx是因为我们要得到与y轴的夹角
+        aspect = np.degrees(np.arctan2(-dx, dy))
+        # 转换为地理坡向(北为0，顺时针)
+        aspect = 90.0 - aspect
+        aspect = np.where(aspect < 0, aspect + 360, aspect)
+        
+        # 保存结果
+        self.slope = slope
+        self.aspect = aspect
+        
+        # 打印坡度统计信息
+        print("\n坡度统计信息:")
+        print(f"最小值: {np.nanmin(slope):.2f}°")
+        print(f"最大值: {np.nanmax(slope):.2f}°")
+        print(f"平均值: {np.nanmean(slope):.2f}°")
+        print(f"中位数: {np.nanmedian(slope):.2f}°")
+        print(f"标准差: {np.nanstd(slope):.2f}°")
+        
+        # 打印坡度分布
+        bins = [0, 5, 15, 30, 45, np.inf]
+        labels = ['平地', '缓坡', '中坡', '陡坡', '峭壁']
+        hist, _ = np.histogram(slope[~np.isnan(slope)], bins=bins)
+        print("\n坡度分布:")
+        for i, (count, label) in enumerate(zip(hist, labels)):
+            print(f"{label}: {count} 像素 ({count/slope.size*100:.2f}%)")
+        
+        return slope, aspect
+        
+    def save_results(
+        self,
+        slope_path: str = SLOPE_PATH,
+        aspect_path: str = ASPECT_PATH
+    ) -> None:
+        """
+        保存计算结果
+
+        参数:
+            slope_path: 坡度文件保存路径
+            aspect_path: 坡向文件保存路径
+        """
+        if self.slope is None or self.aspect is None:
+            raise ValueError("请先计算坡度和坡向")
+            
+        # 保存坡度
+        with rasterio.open(
+            slope_path,
+            'w',
+            driver='GTiff',
+            height=self.slope.shape[0],
+            width=self.slope.shape[1],
+            count=1,
+            dtype=self.slope.dtype,
+            crs=self.crs,
+            transform=self.transform
+        ) as dst:
+            dst.write(self.slope, 1)
+            
+        # 保存坡向
+        with rasterio.open(
+            aspect_path,
+            'w',
+            driver='GTiff',
+            height=self.aspect.shape[0],
+            width=self.aspect.shape[1],
+            count=1,
+            dtype=self.aspect.dtype,
+            crs=self.crs,
+            transform=self.transform
+        ) as dst:
+            dst.write(self.aspect, 1)
+            
+    def visualize_terrain(self, output_dir: str) -> None:
+        """
+        可视化地形分析结果
+
+        参数:
+            output_dir: 输出目录
+        """
+        if self.dem is None or self.slope is None or self.aspect is None:
+            raise ValueError("请先完成地形分析")
+            
+        # 创建输出目录
+        os.makedirs(output_dir, exist_ok=True)
+        
+        # 设置字体
+        times_font = FontProperties(fname='/usr/share/fonts/truetype/msttcorefonts/Times_New_Roman.ttf')
+        simsun_font = FontProperties(fname='/usr/share/fonts/truetype/custom/simsun.ttc')
+        
+        # 绘制DEM
+        plt.figure(figsize=(12, 8))
+        plt.imshow(self.dem, cmap='terrain')
+        plt.colorbar(label='高程 (m)')
+        plt.title('数字高程模型 (DEM)', fontproperties=simsun_font, fontsize=16)
+        plt.xticks(fontproperties=times_font, fontsize=16)
+        plt.yticks(fontproperties=times_font, fontsize=16)
+        plt.savefig(os.path.join(output_dir, 'dem_visualization.png'), dpi=300, bbox_inches='tight')
+        plt.close()
+        
+        # 绘制坡度
+        plt.figure(figsize=(12, 8))
+        plt.imshow(self.slope, cmap='YlOrRd')
+        plt.colorbar(label='坡度 (°)')
+        plt.title('坡度分布图', fontproperties=simsun_font, fontsize=16)
+        plt.xticks(fontproperties=times_font, fontsize=16)
+        plt.yticks(fontproperties=times_font, fontsize=16)
+        plt.savefig(os.path.join(output_dir, 'slope_visualization.png'), dpi=300, bbox_inches='tight')
+        plt.close()
+        
+        # 绘制坡向
+        plt.figure(figsize=(12, 8))
+        plt.imshow(self.aspect, cmap='hsv')
+        plt.colorbar(label='坡向 (°)')
+        plt.title('坡向分布图', fontproperties=simsun_font, fontsize=16)
+        plt.xticks(fontproperties=times_font, fontsize=16)
+        plt.yticks(fontproperties=times_font, fontsize=16)
+        plt.savefig(os.path.join(output_dir, 'aspect_visualization.png'), dpi=300, bbox_inches='tight')
+        plt.close()
+        
+def main():
+    """主函数：运行地形分析流程"""
+    # 创建地形分析器
+    analyzer = TerrainAnalyzer()
+    
+    # 加载DEM
+    print("加载DEM数据...")
+    analyzer.load_dem()
+    
+    # 计算坡度和坡向
+    print("计算坡度和坡向...")
+    analyzer.calculate_slope_aspect()
+    
+    # 保存结果
+    print("保存计算结果...")
+    analyzer.save_results()
+    
+    # 可视化结果
+    print("生成可视化图表...")
+    analyzer.visualize_terrain(os.path.join("data", "output", "terrain_analysis"))
+    
+    print("地形分析完成！")
+    
+if __name__ == "__main__":
+    main() 
+
+================================================================================
+文件: test_data.py
+================================================================================
+"""
+测试脚本: 检查输入数据文件的有效性
+"""
+
+import rasterio
+import numpy as np
+from config import DEM_PATH, SLOPE_PATH, LANDCOVER_PATH
+
+def check_file(file_path: str) -> None:
+    """检查栅格文件"""
+    print(f"\n检查文件: {file_path}")
+    try:
+        with rasterio.open(file_path) as src:
+            print(f"- 形状: {src.shape}")
+            print(f"- 坐标系: {src.crs}")
+            print(f"- 数据类型: {src.dtypes}")
+            data = src.read(1)
+            print(f"- 数值范围: [{np.nanmin(data)}, {np.nanmax(data)}]")
+            print(f"- 是否有NoData: {np.isnan(data).any()}")
+    except Exception as e:
+        print(f"错误: {str(e)}")
+
+def main():
+    """主函数"""
+    print("开始检查数据文件...")
+    
+    # 检查DEM
+    check_file(DEM_PATH)
+    
+    # 检查坡度
+    check_file(SLOPE_PATH)
+    
+    # 检查土地覆盖
+    check_file(LANDCOVER_PATH)
+
+if __name__ == '__main__':
+    main() 
+
+================================================================================
+文件: trajectory_generator.py
+================================================================================
+"""
+轨迹生成器模块：基于规则的运动模拟
+
+输入：
+- 基础速度图
+- 坡度数据
+- 坡向数据
+- 路径点列表
+
+输出：
+- 轨迹点列表（包含时间戳、位置、速度、朝向）
+
+处理流程：
+1. 加载环境数据
+2. 根据规则计算每个位置的速度约束
+3. 模拟运动过程
+4. 保存轨迹数据
+"""
+
+import os
+import numpy as np
+import pandas as pd
+from typing import List, Tuple, Dict
+import rasterio
+from config import (
+    OUTPUT_DIR,
+    SLOPE_PATH,
+    ASPECT_PATH,
+    DT,
+    MAX_ACCELERATION,
+    MAX_DECELERATION,
+    MAX_TURNING_RATE,
+    ASPECT_UPHILL_REDUCTION_K,
+    ASPECT_CROSS_REDUCTION_K,
+    MAX_CROSS_SLOPE_DEGREES,
+    MAX_BRAKING_SPEED_DOWNHILL
+)
+
+class TrajectoryGenerator:
+    """轨迹生成器类"""
+    
+    def __init__(self):
+        """初始化轨迹生成器"""
+        self.base_speed = None
+        self.slope = None
+        self.aspect = None
+        self.transform = None
+        self.shape = None
+        
+    def load_data(self) -> None:
+        """加载环境数据"""
+        print("加载环境数据...")
+        
+        # 加载基础速度图
+        speed_path = os.path.join(OUTPUT_DIR, "intermediate", "base_speed_map.tif")
+        with rasterio.open(speed_path) as src:
+            self.base_speed = src.read(1)
+            self.transform = src.transform
+            self.shape = self.base_speed.shape
+            
+        # 加载坡度数据
+        with rasterio.open(SLOPE_PATH) as src:
+            self.slope = src.read(1)
+            
+        # 加载坡向数据
+        with rasterio.open(ASPECT_PATH) as src:
+            self.aspect = src.read(1)
+            
+    def calculate_slope_factors(
+        self,
+        pos: Tuple[int, int],
+        heading: float
+    ) -> Tuple[float, float, float]:
+        """
+        计算坡度影响因子
+        
+        参数:
+            pos: 当前位置
+            heading: 当前朝向（度，北为0，顺时针）
+            
+        返回:
+            Tuple[float, float, float]: 上坡因子、横坡因子、下坡因子
+        """
+        # 获取当前位置的坡度和坡向
+        slope_mag = self.slope[pos]
+        slope_aspect = self.aspect[pos]
+        
+        # 计算车辆朝向与坡向的夹角
+        angle_diff = abs(heading - slope_aspect)
+        if angle_diff > 180:
+            angle_diff = 360 - angle_diff
+            
+        # 计算上坡/下坡分量
+        slope_along = slope_mag * np.cos(np.radians(angle_diff))
+        
+        # 计算横坡分量
+        slope_cross = slope_mag * np.sin(np.radians(angle_diff))
+        
+        # 计算影响因子
+        if slope_along > 0:  # 上坡
+            uphill_factor = max(0.1, 1 - ASPECT_UPHILL_REDUCTION_K * slope_along)
+            downhill_factor = 1.0
+        else:  # 下坡
+            uphill_factor = 1.0
+            base_speed = self.base_speed[pos]
+            if base_speed > 0:
+                downhill_factor = min(1.0, MAX_BRAKING_SPEED_DOWNHILL / base_speed)
+            else:
+                downhill_factor = 0.1  # 基础速度为0时使用最小因子
+            
+        # 横坡影响
+        cross_factor = max(0.05, 1 - ASPECT_CROSS_REDUCTION_K * slope_cross**2)
+        if abs(slope_cross) > MAX_CROSS_SLOPE_DEGREES:
+            cross_factor = 0.05  # 几乎停止
+            
+        return uphill_factor, cross_factor, downhill_factor
+        
+    def get_target_speed(
+        self,
+        pos: Tuple[int, int],
+        heading: float
+    ) -> float:
+        """
+        获取目标速度
+        
+        参数:
+            pos: 当前位置
+            heading: 当前朝向
+            
+        返回:
+            float: 目标速度
+        """
+        # 获取基础速度
+        base_speed = self.base_speed[pos]
+        
+        # 计算坡度影响
+        uphill, cross, downhill = self.calculate_slope_factors(pos, heading)
+        
+        # 应用所有影响因子
+        target_speed = base_speed * uphill * cross * downhill
+        
+        # 添加随机扰动（±10%）
+        target_speed *= np.random.uniform(0.9, 1.1)
+        
+        return max(0.1, target_speed)  # 确保速度不会太小
+        
+    def interpolate_position(
+        self,
+        pos1: Tuple[int, int],
+        pos2: Tuple[int, int],
+        ratio: float
+    ) -> Tuple[float, float]:
+        """
+        线性插值计算位置
+        
+        参数:
+            pos1: 起始位置
+            pos2: 目标位置
+            ratio: 插值比例
+            
+        返回:
+            Tuple[float, float]: 插值后的位置
+        """
+        return (
+            pos1[0] + (pos2[0] - pos1[0]) * ratio,
+            pos1[1] + (pos2[1] - pos1[1]) * ratio
+        )
+        
+    def calculate_heading(
+        self,
+        current_pos: Tuple[float, float],
+        target_pos: Tuple[int, int]
+    ) -> float:
+        """
+        计算朝向角度
+        
+        参数:
+            current_pos: 当前位置
+            target_pos: 目标位置
+            
+        返回:
+            float: 朝向角度（度，北为0，顺时针）
+        """
+        dy = target_pos[0] - current_pos[0]
+        dx = target_pos[1] - current_pos[1]
+        angle = np.degrees(np.arctan2(-dx, dy))  # 使用-dx是因为我们要得到与y轴的夹角
+        return angle % 360
+        
+    def generate_trajectory(
+        self,
+        path: List[Tuple[int, int]],
+        trajectory_id: int
+    ) -> pd.DataFrame:
+        """
+        生成轨迹
+        
+        参数:
+            path: 路径点列表
+            trajectory_id: 轨迹ID
+            
+        返回:
+            pd.DataFrame: 轨迹数据
+        """
+        if len(path) < 2:
+            raise ValueError("路径至少需要两个点")
+            
+        # 初始化状态
+        current_pos = path[0]
+        current_speed = 0.0
+        path_index = 1
+        time = 0.0
+        
+        # 初始化轨迹点列表
+        trajectory = []
+        
+        print(f"\n生成轨迹 {trajectory_id}...")
+        print(f"路径长度: {len(path)}个点")
+        print(f"起点: {path[0]}")
+        print(f"终点: {path[-1]}")
+        
+        # 主循环
+        while path_index < len(path):
+            # 获取目标点
+            target_pos = path[path_index]
+            
+            # 计算朝向
+            target_heading = self.calculate_heading(current_pos, target_pos)
+            
+            # 获取当前位置的整数坐标（用于查询地图）
+            current_row = int(round(current_pos[0]))
+            current_col = int(round(current_pos[1]))
+            current_pos_int = (current_row, current_col)
+            
+            # 计算目标速度
+            target_speed = self.get_target_speed(current_pos_int, target_heading)
+            
+            # 应用加速度限制
+            speed_diff = target_speed - current_speed
+            if speed_diff > 0:
+                acceleration = min(speed_diff / DT, MAX_ACCELERATION)
+            else:
+                acceleration = max(speed_diff / DT, MAX_DECELERATION)
+            
+            # 更新速度
+            current_speed = current_speed + acceleration * DT
+            
+            # 计算移动距离
+            distance = current_speed * DT
+            
+            # 计算到目标点的距离
+            to_target = np.sqrt(
+                (target_pos[0] - current_pos[0])**2 +
+                (target_pos[1] - current_pos[1])**2
+            )
+            
+            # 如果可以到达目标点
+            if distance >= to_target:
+                current_pos = target_pos
+                path_index += 1
+            else:
+                # 移动一步
+                ratio = distance / to_target
+                current_pos = self.interpolate_position(current_pos, target_pos, ratio)
+                
+            # 记录轨迹点
+            trajectory.append({
+                'trajectory_id': trajectory_id,
+                'timestamp': time,
+                'row': current_pos[0],
+                'col': current_pos[1],
+                'speed': current_speed,
+                'heading': target_heading,
+                'target_speed': target_speed,
+                'acceleration': acceleration
+            })
+            
+            # 更新时间
+            time += DT
+            
+        # 创建DataFrame
+        df = pd.DataFrame(trajectory)
+        
+        # 计算统计信息
+        duration = time
+        distance = sum(
+            np.sqrt(
+                (df['row'].iloc[i+1] - df['row'].iloc[i])**2 +
+                (df['col'].iloc[i+1] - df['col'].iloc[i])**2
+            ) * 30  # 30米分辨率
+            for i in range(len(df)-1)
+        )
+        avg_speed = distance / duration
+        
+        print(f"轨迹生成完成:")
+        print(f"  持续时间: {duration/3600:.2f}小时")
+        print(f"  总距离: {distance/1000:.2f}公里")
+        print(f"  平均速度: {avg_speed*3.6:.2f}公里/小时")
+        
+        return df
+        
+    def save_trajectory(self, df: pd.DataFrame, trajectory_id: int) -> None:
+        """
+        保存轨迹数据
+        
+        参数:
+            df: 轨迹数据
+            trajectory_id: 轨迹ID
+        """
+        # 创建输出目录
+        output_dir = os.path.join(OUTPUT_DIR, "trajectories")
+        os.makedirs(output_dir, exist_ok=True)
+        
+        # 保存到CSV
+        output_path = os.path.join(output_dir, f"trajectory_{trajectory_id}.csv")
+        df.to_csv(output_path, index=False)
+        print(f"轨迹数据已保存至: {output_path}")
+        
+def main():
+    """主函数：测试轨迹生成器"""
+    from path_planner import PathPlanner
+    
+    # 创建路径规划器
+    planner = PathPlanner()
+    planner.load_cost_map()
+    
+    # 测试路径规划
+    start = (100, 100)
+    goal = (200, 200)
+    path, cost = planner.find_path(start, goal)
+    
+    if not path:
+        print("未找到可行路径")
+        return
+        
+    # 创建轨迹生成器
+    generator = TrajectoryGenerator()
+    generator.load_data()
+    
+    # 生成轨迹
+    df = generator.generate_trajectory(path, trajectory_id=0)
+    
+    # 保存轨迹
+    generator.save_trajectory(df, trajectory_id=0)
+    
+if __name__ == "__main__":
+    main() 
+
+================================================================================
+文件: utils.py
+================================================================================
+"""
+工具函数模块: 提供项目中需要的通用功能函数
+
+包含:
+- 坐标转换函数
+- 距离计算函数
+- 数据验证函数
+"""
+
+import numpy as np
+import rasterio
+from typing import Tuple, Union, List, Optional
+
+def pixel_to_geo(
+    transform: rasterio.Affine,
+    row: int,
+    col: int
+) -> Tuple[float, float]:
+    """
+    将像素坐标转换为地理坐标
+
+    参数:
+        transform: rasterio的仿射变换矩阵
+        row: 像素行号
+        col: 像素列号
+
+    返回:
+        (lon, lat): 经度和纬度
+    """
+    lon, lat = transform * (col + 0.5, row + 0.5)
+    return lon, lat
+
+def geo_to_pixel(
+    transform: rasterio.Affine,
+    lon: float,
+    lat: float
+) -> Tuple[int, int]:
+    """
+    将地理坐标转换为像素坐标
+
+    参数:
+        transform: rasterio的仿射变换矩阵
+        lon: 经度
+        lat: 纬度
+
+    返回:
+        (row, col): 像素行号和列号
+    """
+    col, row = ~transform * (lon, lat)
+    return int(row), int(col)
+
+def haversine_distance(
+    point1: Tuple[float, float],
+    point2: Tuple[float, float]
+) -> float:
+    """
+    计算两个经纬度点之间的距离(米)
+
+    参数:
+        point1: 第一个点的坐标 (lon1, lat1)
+        point2: 第二个点的坐标 (lon2, lat2)
+
+    返回:
+        两点间的距离(米)
+    """
+    # 地球平均半径(米)
+    R = 6371000
+    
+    # 将经纬度转换为弧度
+    lon1, lat1 = np.radians(point1)
+    lon2, lat2 = np.radians(point2)
+    
+    # 计算经纬度差
+    dlon = lon2 - lon1
+    dlat = lat2 - lat1
+    
+    # Haversine公式
+    a = np.sin(dlat/2)**2 + np.cos(lat1) * np.cos(lat2) * np.sin(dlon/2)**2
+    c = 2 * np.arctan2(np.sqrt(a), np.sqrt(1-a))
+    
+    return R * c
+
+def calculate_distance(
+    point1: Tuple[float, float],
+    point2: Tuple[float, float],
+    transform: Optional[rasterio.Affine] = None
+) -> float:
+    """
+    计算两点间的距离
+
+    参数:
+        point1: 第一个点的坐标 (x1, y1)
+        point2: 第二个点的坐标 (x2, y2)
+        transform: rasterio的仿射变换矩阵,用于将像素坐标转换为地理坐标
+
+    返回:
+        两点间的距离(米)
+    """
+    if transform is not None:
+        # 将像素坐标转换为地理坐标
+        geo1 = pixel_to_geo(transform, point1[0], point1[1])
+        geo2 = pixel_to_geo(transform, point2[0], point2[1])
+        return haversine_distance(geo1, geo2)
+    else:
+        # 直接计算欧几里得距离
+        dx = point2[1] - point1[1]
+        dy = point2[0] - point1[0]
+        return np.sqrt(dx*dx + dy*dy)
+
+def validate_point(
+    point: Tuple[int, int],
+    shape: Tuple[int, int]
+) -> bool:
+    """
+    验证点坐标是否在栅格范围内
+
+    参数:
+        point: 点坐标 (row, col)
+        shape: 栅格形状 (height, width)
+
+    返回:
+        是否有效
+    """
+    row, col = point
+    height, width = shape
+    return (0 <= row < height) and (0 <= col < width)
+
+def get_neighbors(
+    point: Tuple[int, int],
+    shape: Tuple[int, int],
+    diagonal: bool = True
+) -> List[Tuple[int, int]]:
+    """
+    获取栅格中某点的邻居像素坐标
+
+    参数:
+        point: 中心点坐标 (row, col)
+        shape: 栅格形状 (height, width)
+        diagonal: 是否包含对角线方向的邻居
+
+    返回:
+        邻居坐标列表
+    """
+    row, col = point
+    height, width = shape
+    neighbors = []
+
+    # 上下左右四个方向
+    directions = [
+        (-1, 0), (1, 0), (0, -1), (0, 1)
+    ]
+    
+    # 如果包含对角线方向
+    if diagonal:
+        directions.extend([
+            (-1, -1), (-1, 1), (1, -1), (1, 1)
+        ])
+
+    for dr, dc in directions:
+        new_row, new_col = row + dr, col + dc
+        if validate_point((new_row, new_col), shape):
+            neighbors.append((new_row, new_col))
+
+    return neighbors 
+
+================================================================================
+文件: visualizer.py
+================================================================================
+import numpy as np
+import matplotlib.pyplot as plt
+from matplotlib.colors import LinearSegmentedColormap
+import pandas as pd
+from map_generator import MapGenerator
+from path_planner import PathPlanner
+from matplotlib.font_manager import FontProperties
+from typing import List, Tuple, Optional
+
+class PathVisualizer:
+    """路径可视化器"""
+    
+    def __init__(self, env: MapGenerator):
+        """
+        初始化可视化器
+        
+        参数:
+            env: MapGenerator对象，包含地图数据
+        """
+        self.env = env
+        
+        # 设置Times New Roman字体
+        self.times_font = FontProperties(fname='/usr/share/fonts/truetype/msttcorefonts/Times_New_Roman.ttf')
+        # 设置宋体
+        self.simsun_font = FontProperties(fname='/usr/share/fonts/truetype/custom/simsun.ttc')
+        
+        # 设置matplotlib的默认字体
+        plt.rcParams['font.size'] = 16
+        plt.rcParams['axes.unicode_minus'] = False
+        
+    def visualize_paths(
+        self,
+        paths: List[List[Tuple[int, int]]],
+        start_points: List[Tuple[int, int]],
+        target_points: List[Tuple[int, int]],
+        save_path: str
+    ) -> None:
+        """
+        可视化多条路径
+        
+        参数:
+            paths: 路径列表，每个路径是一个坐标点列表
+            start_points: 起点列表
+            target_points: 目标点列表
+            save_path: 保存路径
+        """
+        # 创建图形和子图
+        plt.figure(figsize=(15, 12))
+        
+        # 绘制成本图作为背景
+        plt.imshow(self.env.cost_map, cmap='YlOrRd', alpha=0.6)
+        
+        # 绘制所有路径
+        colors = ['b', 'g', 'r', 'c', 'm', 'y']
+        for i, path in enumerate(paths):
+            if path:
+                path = np.array(path)
+                plt.plot(path[:, 1], path[:, 0], 
+                        color=colors[i % len(colors)], 
+                        linewidth=2, 
+                        label=f'路径 {i+1}',
+                        alpha=0.8)
+        
+        # 绘制起点和终点
+        for i, (start, target) in enumerate(zip(start_points, target_points)):
+            plt.scatter(start[1], start[0], 
+                       c='g', marker='^', s=150,
+                       label='起点' if i == 0 else '')
+            plt.scatter(target[1], target[0], 
+                       c='r', marker='*', s=200,
+                       label='目标点' if i == 0 else '')
+        
+        # 设置标题和标签
+        plt.title('路径规划结果（背景为成本图）', fontproperties=self.simsun_font)
+        plt.xlabel('东西方向（像素）', fontproperties=self.simsun_font)
+        plt.ylabel('南北方向（像素）', fontproperties=self.simsun_font)
+        
+        # 设置图例
+        plt.legend(prop=self.simsun_font, loc='upper right', bbox_to_anchor=(1.15, 1))
+        
+        # 设置刻度字体
+        plt.xticks(fontproperties=self.times_font)
+        plt.yticks(fontproperties=self.times_font)
+        
+        # 调整布局
+        plt.tight_layout()
+        
+        # 保存图像
+        plt.savefig(save_path, dpi=300, bbox_inches='tight')
+        plt.close()
+
+def main():
+    """主函数：测试可视化效果"""
+    # 1. 加载环境数据
+    print("1. 加载环境数据...")
+    env = MapGenerator()
+    env.load_data()
+    env.generate_cost_map()
+    
+    # 2. 创建路径规划器
+    print("2. 创建路径规划器...")
+    planner = PathPlanner(env)
+    
+    # 3. 创建可视化器
+    print("3. 创建可视化器...")
+    visualizer = PathVisualizer(env)
+    
+    # 4. 读取起终点对数据
+    print("4. 读取起终点对数据...")
+    pairs_df = pd.read_csv('data/start_end_pairs.csv')
+    
+    # 获取所有不同的目标点
+    target_points = pairs_df[['end_row', 'end_col']].drop_duplicates().values
+    print(f"\n找到{len(target_points)}个目标点，每个目标点选择2条路径进行展示...")
+    
+    all_paths = []
+    start_points = []
+    target_points_used = []
+    
+    # 为每个目标点规划2条路径
+    for i, target in enumerate(target_points, 1):
+        print(f"\n处理目标点 {i}/{len(target_points)}: ({target[0]}, {target[1]})")
+        
+        # 获取该目标点对应的所有起点
+        target_pairs = pairs_df[
+            (pairs_df['end_row'] == target[0]) & 
+            (pairs_df['end_col'] == target[1])
+        ]
+        
+        # 随机选择2个起点
+        selected_pairs = target_pairs.sample(n=min(2, len(target_pairs)))
+        
+        for j, (_, pair) in enumerate(selected_pairs.iterrows(), 1):
+            start = (int(pair['start_row']), int(pair['start_col']))
+            goal = (int(pair['end_row']), int(pair['end_col']))
+            
+            print(f"  规划路径 {j}/2: {start} -> {goal}")
+            
+            try:
+                path = planner.find_path(start, goal)
+                if path:
+                    path = planner.smooth_path(path)
+                    all_paths.append(path)
+                    start_points.append(start)
+                    target_points_used.append(goal)
+                else:
+                    print("    未找到有效路径")
+            except ValueError as e:
+                print(f"    错误: {e}")
+    
+    # 5. 保存可视化结果
+    print("\n5. 保存可视化结果...")
+    visualizer.visualize_paths(
+        all_paths,
+        start_points,
+        target_points_used,
+        'data/paths/path_visualization.png'
+    )
+    print("可视化结果已保存到: data/paths/path_visualization.png")
+
+if __name__ == "__main__":
+    main() 
+
+================================================================================
+文件: visualize_trajectories.py
+================================================================================
+"""
+轨迹可视化模块：展示生成的轨迹
+
+输入：
+- landcover_30m_100km.tif：土地覆盖数据
+- trajectories/*.csv：轨迹数据文件
+
+输出：
+- 轨迹可视化图像
+"""
+
+import os
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+from matplotlib.colors import ListedColormap
+import rasterio
+import plot_style  # 导入统一样式设置
+from config import (
+    INPUT_DIR,
+    OUTPUT_DIR,
+    LANDCOVER_PATH,
+    LANDCOVER_CODES
+)
+
+def load_landcover():
+    """加载土地覆盖数据"""
+    with rasterio.open(LANDCOVER_PATH) as src:
+        return src.read(1)
+
+def create_landcover_colormap():
+    """创建土地覆盖类型的颜色映射"""
+    colors = {
+        10: '#0077BE',    # 水域：蓝色
+        20: '#80CCFF',    # 湿地：浅蓝色
+        30: '#90EE90',    # 草地：浅绿色
+        40: '#228B22',    # 灌木地：深绿色
+        50: '#CD5C5C',    # 建筑用地：红褐色
+        60: '#FFD700',    # 农田：金黄色
+        80: '#006400',    # 森林：深绿色
+        90: '#DEB887',    # 荒地：棕色
+        255: '#808080'    # 未分类：灰色
+    }
+    
+    # 创建颜色映射
+    max_code = max(LANDCOVER_CODES.keys())
+    cmap_colors = ['#000000'] * (max_code + 1)  # 默认黑色
+    for code, color in colors.items():
+        cmap_colors[code] = color
+        
+    return ListedColormap(cmap_colors)
+
+def create_legend_elements():
+    """创建图例元素"""
+    from matplotlib.patches import Patch
+    
+    colors = {
+        '水域': '#0077BE',
+        '湿地': '#80CCFF',
+        '草地': '#90EE90',
+        '灌木地': '#228B22',
+        '建筑用地': '#CD5C5C',
+        '农田': '#FFD700',
+        '森林': '#006400',
+        '荒地': '#DEB887'
+    }
+    
+    return [Patch(facecolor=color, label=name) for name, color in colors.items()]
+
+def load_trajectories():
+    """加载所有轨迹数据"""
+    trajectories = []
+    traj_dir = os.path.join(OUTPUT_DIR, "trajectories")
+    
+    for file in os.listdir(traj_dir):
+        if file.startswith("trajectory_") and file.endswith(".csv"):
+            path = os.path.join(traj_dir, file)
+            df = pd.read_csv(path)
+            trajectories.append(df)
+            
+    return trajectories
+
+def plot_trajectory_on_map(landcover, trajectory, ax, title):
+    """在地图上绘制单条轨迹"""
+    # 绘制地形图
+    cmap = create_landcover_colormap()
+    im = ax.imshow(landcover, cmap=cmap)
+    
+    # 绘制轨迹
+    points = trajectory[['row', 'col']].values
+    speeds = trajectory['speed'].values
+    
+    # 绘制轨迹线
+    ax.plot(points[:, 1], points[:, 0], 'w-', linewidth=0.8, alpha=0.6)
+    
+    # 绘制轨迹点，颜色表示速度
+    scatter = ax.scatter(
+        points[:, 1],
+        points[:, 0],
+        c=speeds,
+        cmap='plasma',
+        s=2,
+        alpha=0.8
+    )
+    
+    # 添加起点和终点标记
+    ax.plot(points[0, 1], points[0, 0], 'g*', markersize=12, label='起点')
+    ax.plot(points[-1, 1], points[-1, 0], 'r*', markersize=12, label='终点')
+    
+    # 添加地形图例
+    legend_elements = create_legend_elements()
+    terrain_legend = ax.legend(
+        handles=legend_elements,
+        title='地形类型',
+        loc='center left',
+        bbox_to_anchor=(1.02, 0.5)
+    )
+    ax.add_artist(terrain_legend)
+    
+    # 添加起终点图例
+    path_legend = ax.legend(
+        loc='upper left',
+        bbox_to_anchor=(1.02, 1.0)
+    )
+    ax.add_artist(path_legend)
+    
+    # 添加颜色条
+    cbar = plt.colorbar(scatter, ax=ax)
+    cbar.set_label('速度 (m/s)', fontsize=16)
+    cbar.ax.tick_params(labelsize=16)
+    
+    # 设置标题
+    ax.set_title(title, pad=20)
+    
+    # 设置坐标轴标签
+    ax.set_xlabel('列号', fontsize=16)
+    ax.set_ylabel('行号', fontsize=16)
+    
+    # 添加网格
+    ax.grid(True, linestyle='--', alpha=0.3, color='gray')
+    
+def main():
+    """主函数"""
+    print("加载数据...")
+    landcover = load_landcover()
+    trajectories = load_trajectories()
+    
+    print(f"共加载了{len(trajectories)}条轨迹")
+    
+    # 创建图形
+    n_trajectories = len(trajectories)
+    n_cols = min(2, n_trajectories)
+    n_rows = (n_trajectories + 1) // 2
+    
+    # 设置更大的图形尺寸以适应图例
+    plt.figure(figsize=(20, 10 * n_rows))
+    
+    # 绘制每条轨迹
+    for i, traj in enumerate(trajectories):
+        ax = plt.subplot(n_rows, n_cols, i + 1)
+        
+        # 计算统计信息
+        duration = traj['timestamp'].max() / 3600  # 小时
+        distance = sum(
+            np.sqrt(
+                (traj['row'].iloc[i+1] - traj['row'].iloc[i])**2 +
+                (traj['col'].iloc[i+1] - traj['col'].iloc[i])**2
+            ) * 30  # 30米分辨率
+            for i in range(len(traj)-1)
+        ) / 1000  # 公里
+        avg_speed = distance / duration  # 公里/小时
+        
+        title = f"轨迹 {i+1}\n" \
+                f"持续时间: {duration:.1f} 小时\n" \
+                f"总距离: {distance:.1f} 公里\n" \
+                f"平均速度: {avg_speed:.1f} 公里/小时"
+                
+        plot_trajectory_on_map(landcover, traj, ax, title)
+        
+    # 调整布局
+    plt.tight_layout()
+    
+    # 保存图像
+    output_path = os.path.join(OUTPUT_DIR, "trajectories_visualization.png")
+    plt.savefig(output_path, dpi=300, bbox_inches='tight')
+    print(f"\n可视化结果已保存至: {output_path}")
+    
+    # 显示图像
+    plt.show()
+    
+if __name__ == "__main__":
+    main() 
+
+================================================================================
+文件: 作图规范.md
+================================================================================
+# Python科学绘图规范
+
+## 1. 字体设置
+
+### 1.1 基本要求
+- 中文：宋体 (SimSun)，16号
+- 英文和数字：Times New Roman，16号
+- 坐标轴刻度：Times New Roman，16号
+- 图例：中文使用宋体，英文和数字使用Times New Roman，16号
+
+### 1.2 使用方法
+1. 将`plot_style.py`文件放在项目根目录下
+2. 在绘图脚本开头导入样式文件：
+```python
+import plot_style
+```
+这样就会自动应用统一的字体和样式设置。
+
+## 2. 图形规范
+
+### 2.1 基本设置
+- 默认图像大小：8×6 英寸
+- 显示分辨率：100 DPI
+- 保存分辨率：300 DPI
+- 默认显示网格线（灰色虚线，透明度0.3）
+
+### 2.2 次方显示
+- 使用上标形式，如：$\times 10^{-3}$
+- 在LaTeX模式下书写
+- 示例代码：
+```python
+ax.set_ylabel('速度 ($\\times 10^{-3}$ m/s)')
+```
+
+### 2.3 单位标注
+- 使用括号括起单位
+- 单位使用Times New Roman
+- 示例：速度 (m/s)、时间 (s)、温度 (K)
+
+## 3. 示例代码
+
+```python
+import matplotlib.pyplot as plt
+import numpy as np
+import plot_style  # 导入统一样式设置
+
+# 创建数据
+x = np.linspace(0, 10, 100)
+y = np.sin(x)
+
+# 创建图形
+fig, ax = plt.subplots()
+
+# 绘制曲线
+ax.plot(x, y, 'b-', label='正弦曲线')
+
+# 设置标题和标签
+ax.set_title('正弦函数示例')
+ax.set_xlabel('时间 (s)')
+ax.set_ylabel('幅值 ($\\times 10^{-3}$)')
+
+# 添加图例
+ax.legend()
+
+# 保存图片
+plt.savefig('example.png', bbox_inches='tight')
+```
+
+## 4. 注意事项
+
+1. 确保系统中已安装所需字体：
+   - 宋体：`/usr/share/fonts/truetype/custom/simsun.ttc`
+   - Times New Roman：`/usr/share/fonts/truetype/custom/times.ttf`
+
+2. 如果出现字体问题：
+   - 检查字体文件是否存在
+   - 运行`fc-cache -fv`更新字体缓存
+   - 重启Python内核
+
+3. 图像元素的统一性：
+   - 所有文字大小保持一致（16号）
+   - 保持网格线样式统一
+   - 颜色搭配协调
+
+4. 保存图像：
+   - 使用`bbox_inches='tight'`参数避免标签被裁剪
+   - 建议同时保存`.png`和`.pdf`格式
+   - 使用至少300DPI的分辨率
+
+## 5. 常见问题解决
+
+1. 如果中文显示为方块：
+   - 检查宋体文件路径是否正确
+   - 确认`plot_style.py`中的字体设置正确
+
+2. 如果数学公式显示异常：
+   - 使用原始字符串`r'$\times 10^{-3}$'`
+   - 确保LaTeX相关包已安装
+
+3. 如果需要修改默认设置：
+   - 编辑`plot_style.py`中的参数
+   - 重新导入样式文件 
+
+================================================================================
+文件: docs/path_planning_issues.md
+================================================================================
+# 路径规划问题记录
+
+## 当前状态
+
+### 已完成的工作
+1. 完成了基本的地图生成器（MapGenerator）
+   - 实现了土地覆盖数据加载
+   - 实现了高程数据处理
+   - 实现了速度图和成本图生成
+2. 完成了路径规划器（PathPlanner）
+   - 实现了A*算法的基本框架
+   - 实现了路径平滑功能
+3. 完成了可视化模块
+   - 实现了地图可视化
+   - 实现了路径可视化
+
+### 运行情况
+1. 环境数据加载正常
+2. 成本图生成过程中出现警告：
+   ```
+   RuntimeWarning: overflow encountered in multiply
+   slope = np.degrees(np.arctan(np.sqrt(dx*dx + dy*dy)))
+   ```
+3. 权重矩阵生成正常：
+   - 类型：int32
+   - 取值范围：[1, 1000]
+   - 无NaN值和Inf值
+
+## 存在的问题
+
+### 1. 坡度计算溢出
+- **问题描述**：在计算坡度时出现数值溢出
+- **原因分析**：`dx*dx + dy*dy`计算时可能超出数值范围
+- **解决方案**：
+  1. 使用更大的数据类型（如float64）
+  2. 分步计算以避免中间结果溢出
+  3. 对梯度值进行归一化处理
+
+### 2. 路径规划性能
+- **问题描述**：A*算法在大地图上运行效率较低
+- **原因分析**：
+  1. 搜索空间过大（3333x3333像素）
+  2. 权重矩阵计算复杂
+  3. 启发式函数可能不够优化
+- **解决方案**：
+  1. 实现分层路径规划
+  2. 优化启发式函数
+  3. 使用双向A*搜索
+  4. 实现跳点搜索（Jump Point Search）
+
+### 3. 成本图生成
+- **问题描述**：成本图中可能存在不合理的值
+- **原因分析**：
+  1. 速度为0时的处理可能不够合理
+  2. 坡度影响因子的计算可能需要调整
+- **解决方案**：
+  1. 优化速度阈值的设置
+  2. 改进坡度影响因子的计算方法
+  3. 添加更多的数据验证和异常处理
+
+## 下一步工作
+
+### 短期目标
+1. 修复坡度计算的溢出问题
+2. 优化A*算法的性能
+3. 改进成本图生成方法
+
+### 中期目标
+1. 实现分层路径规划
+2. 添加路径平滑的质量控制
+3. 优化内存使用
+
+### 长期目标
+1. 实现多目标路径规划
+2. 添加动态障碍物处理
+3. 实现实时路径更新
+
+## 数据收集需求
+
+### 性能数据
+1. 不同地图大小下的规划时间
+2. 内存使用情况
+3. 路径质量指标（长度、平滑度等）
+
+### 算法参数
+1. 最优权重矩阵范围
+2. 启发式函数参数
+3. 平滑因子的影响
+
+### 环境数据
+1. 典型场景的坡度分布
+2. 土地覆盖类型的分布
+3. 障碍物密度统计 
+

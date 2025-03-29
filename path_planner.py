@@ -29,7 +29,7 @@ class Node:
         self.pos = pos
         self.g_cost = g_cost  # 从起点到当前点的成本
         self.h_cost = h_cost  # 从当前点到终点的估计成本
-        self.f_cost = g_cost + h_cost  # 总成本
+        self.f_cost = g_cost + 0.8 * h_cost  # 降低启发式权重
         self.parent = parent
         
     def __lt__(self, other):
@@ -61,7 +61,8 @@ class PathPlanner:
         返回:
             float: 启发式成本
         """
-        return abs(pos[0] - goal[0]) + abs(pos[1] - goal[1])
+        weight = 0.8  # 降低启发式权重，让算法更多考虑实际路径成本
+        return weight * (abs(pos[0] - goal[0]) + abs(pos[1] - goal[1]))
         
     def get_neighbors(self, pos: Tuple[int, int]) -> List[Tuple[int, int]]:
         """
@@ -111,13 +112,16 @@ class PathPlanner:
         # 使用两点的平均成本
         avg_cost = (self.cost_map[pos1] + self.cost_map[pos2]) / 2
         
-        return distance * avg_cost
+        # 添加局部变化因子，使相似成本区域也有细微差异
+        local_variation = np.random.uniform(0.95, 1.05)
+        
+        return distance * avg_cost * local_variation
         
     def find_path(
         self,
         start: Tuple[int, int],
         goal: Tuple[int, int]
-    ) -> Tuple[List[Tuple[int, int]], float]:
+    ) -> Tuple[List[Tuple[int, int]], List[Tuple[int, int]], float]:
         """
         使用A*算法找到最优路径
         
@@ -126,7 +130,8 @@ class PathPlanner:
             goal: 终点坐标
             
         返回:
-            Tuple[List[Tuple[int, int]], float]: 路径点列表和总成本
+            Tuple[List[Tuple[int, int]], List[Tuple[int, int]], float]: 
+            原始路径、平滑后的路径和总成本
         """
         if self.cost_map is None:
             self.load_cost_map()
@@ -168,10 +173,11 @@ class PathPlanner:
                 smoothed_path = self.smooth_path(path)
                 
                 print(f"找到路径！")
-                print(f"路径长度: {len(smoothed_path)}个点")
+                print(f"原始路径长度: {len(path)}个点")
+                print(f"平滑后路径长度: {len(smoothed_path)}个点")
                 print(f"总成本: {total_cost:.2f}")
                 
-                return smoothed_path, total_cost
+                return path, smoothed_path, total_cost
                 
             # 将当前节点加入关闭列表
             closed_set.add(current.pos)
@@ -199,12 +205,13 @@ class PathPlanner:
                     heapq.heappush(open_list, neighbor_node)
                     
         print("未找到路径！")
-        return [], float('inf')
+        return [], [], float('inf')
         
     def smooth_path(
         self,
         path: List[Tuple[int, int]],
-        sigma: float = 2.0
+        sigma: float = 3.0,  # 增加sigma值使路径更平滑
+        window_size: int = 5  # 添加滑动窗口大小参数
     ) -> List[Tuple[int, int]]:
         """
         使用高斯滤波平滑路径
@@ -212,6 +219,7 @@ class PathPlanner:
         参数:
             path: 原始路径
             sigma: 高斯核标准差
+            window_size: 滑动窗口大小
             
         返回:
             List[Tuple[int, int]]: 平滑后的路径
@@ -227,11 +235,25 @@ class PathPlanner:
         smooth_rows = gaussian_filter1d(rows, sigma)
         smooth_cols = gaussian_filter1d(cols, sigma)
         
-        # 四舍五入到整数并组合
-        return list(zip(
-            np.round(smooth_rows).astype(int),
-            np.round(smooth_cols).astype(int)
-        ))
+        # 使用滑动窗口进一步平滑
+        def moving_average(arr, window_size):
+            weights = np.ones(window_size) / window_size
+            return np.convolve(arr, weights, mode='valid')
+        
+        if len(smooth_rows) > window_size:
+            smooth_rows = moving_average(smooth_rows, window_size)
+            smooth_cols = moving_average(smooth_cols, window_size)
+            
+        # 确保平滑后的路径点仍然可通行
+        smoothed_path = []
+        for row, col in zip(smooth_rows, smooth_cols):
+            r, c = int(round(row)), int(round(col))
+            # 检查点是否在地图范围内且可通行
+            if (0 <= r < self.shape[0] and 0 <= c < self.shape[1] and 
+                np.isfinite(self.cost_map[r, c])):
+                smoothed_path.append((r, c))
+                
+        return smoothed_path
         
 def main():
     """主函数：测试路径规划器"""
@@ -244,11 +266,12 @@ def main():
     # 测试路径规划
     start = (100, 100)
     goal = (200, 200)
-    path, cost = planner.find_path(start, goal)
+    path, smoothed_path, cost = planner.find_path(start, goal)
     
     if path:
         print(f"\n路径规划成功:")
-        print(f"路径长度: {len(path)}个点")
+        print(f"原始路径长度: {len(path)}个点")
+        print(f"平滑后路径长度: {len(smoothed_path)}个点")
         print(f"总成本: {cost:.2f}")
     else:
         print("\n未找到可行路径")

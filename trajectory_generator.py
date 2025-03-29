@@ -190,7 +190,7 @@ class TrajectoryGenerator:
         self,
         path: List[Tuple[int, int]],
         trajectory_id: int
-    ) -> pd.DataFrame:
+    ) -> Tuple[pd.DataFrame, Dict]:
         """
         生成轨迹
         
@@ -199,7 +199,7 @@ class TrajectoryGenerator:
             trajectory_id: 轨迹ID
             
         返回:
-            pd.DataFrame: 轨迹数据
+            Tuple[pd.DataFrame, Dict]: 轨迹数据和统计信息
         """
         if len(path) < 2:
             raise ValueError("路径至少需要两个点")
@@ -291,12 +291,19 @@ class TrajectoryGenerator:
         )
         avg_speed = distance / duration
         
-        print(f"轨迹生成完成:")
-        print(f"  持续时间: {duration/3600:.2f}小时")
-        print(f"  总距离: {distance/1000:.2f}公里")
-        print(f"  平均速度: {avg_speed*3.6:.2f}公里/小时")
+        # 创建统计信息字典
+        stats_dict = {
+            'duration_hours': duration/3600,
+            'distance_km': distance/1000,
+            'avg_speed': avg_speed*3.6
+        }
         
-        return df
+        print(f"轨迹生成完成:")
+        print(f"  持续时间: {stats_dict['duration_hours']:.2f}小时")
+        print(f"  总距离: {stats_dict['distance_km']:.2f}公里")
+        print(f"  平均速度: {stats_dict['avg_speed']:.2f}公里/小时")
+        
+        return df, stats_dict
         
     def save_trajectory(self, df: pd.DataFrame, trajectory_id: int) -> None:
         """
@@ -337,7 +344,7 @@ def main():
     generator.load_data()
     
     # 生成轨迹
-    df = generator.generate_trajectory(path, trajectory_id=0)
+    df, stats = generator.generate_trajectory(path, trajectory_id=0)
     
     # 保存轨迹
     generator.save_trajectory(df, trajectory_id=0)
